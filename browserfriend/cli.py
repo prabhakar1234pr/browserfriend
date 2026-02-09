@@ -621,6 +621,18 @@ else:
     print("No PID file found – server may already be stopped")
     stopped = True
 
+# --- End the browsing session in the database ---
+print("Ending browsing session ...")
+try:
+    from browserfriend.database import end_session
+    ended = end_session("{session_id}")
+    if ended:
+        print(f"Session ended (duration: {{ended.duration:.0f}}s)")
+    else:
+        print("Session was already ended or not found")
+except Exception as e:
+    print(f"Warning: could not end session: {{e}}")
+
 # --- Generate dashboard and send email ---
 print("Generating dashboard ...")
 try:
