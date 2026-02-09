@@ -320,6 +320,14 @@ def setup() -> None:
     logger.info("CLI command: setup")
     logger.info("=" * 60)
 
+    # Ensure tables exist before querying (first-run fix)
+    try:
+        from browserfriend.database import init_database
+
+        init_database()
+    except Exception as exc:
+        logger.debug("Could not init database in setup preamble: %s", exc)
+
     existing_email = _get_user_email()
     if existing_email:
         logger.info("Existing user found: %s", existing_email)
