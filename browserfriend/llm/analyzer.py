@@ -19,56 +19,85 @@ logger = logging.getLogger(__name__)
 # Fallback domain categories used when LLM is unavailable
 # ---------------------------------------------------------------------------
 
-DOMAIN_CATEGORIES: dict[str, str] = {
-    "github.com": "development",
-    "gitlab.com": "development",
-    "bitbucket.org": "development",
-    "stackoverflow.com": "development",
-    "stackexchange.com": "development",
-    "developer.mozilla.org": "development",
-    "docs.python.org": "development",
-    "pypi.org": "development",
-    "npmjs.com": "development",
-    "youtube.com": "entertainment",
-    "netflix.com": "entertainment",
-    "twitch.tv": "entertainment",
-    "spotify.com": "entertainment",
-    "reddit.com": "social",
-    "twitter.com": "social",
-    "x.com": "social",
-    "facebook.com": "social",
-    "instagram.com": "social",
-    "linkedin.com": "communication",
-    "gmail.com": "communication",
-    "outlook.com": "communication",
-    "slack.com": "communication",
-    "discord.com": "communication",
-    "mail.google.com": "communication",
-    "amazon.com": "shopping",
-    "ebay.com": "shopping",
-    "cnn.com": "news",
-    "bbc.com": "news",
-    "nytimes.com": "news",
-    "news.ycombinator.com": "news",
-    "medium.com": "news",
-    "google.com": "productivity",
-    "notion.so": "productivity",
-    "docs.google.com": "productivity",
-    "drive.google.com": "productivity",
-    "figma.com": "productivity",
-    "chatgpt.com": "productivity",
-    "claude.ai": "productivity",
-    "udemy.com": "productivity",
-    "coursera.org": "productivity",
-    "edx.org": "productivity",
-    "khanacademy.org": "productivity",
-    "leetcode.com": "development",
-    "codepen.io": "development",
-    "replit.com": "development",
-    "vercel.com": "development",
-    "netlify.com": "development",
-    "heroku.com": "development",
+# Keyword-based fallback categorisation (used only when LLM is unavailable)
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "development": [
+        "github",
+        "gitlab",
+        "bitbucket",
+        "stackoverflow",
+        "stackexchange",
+        "docs.",
+        "pypi",
+        "npm",
+        "crates",
+        "codepen",
+        "replit",
+        "leetcode",
+        "hackerrank",
+        "vercel",
+        "netlify",
+        "heroku",
+    ],
+    "productivity": [
+        "google.com",
+        "notion",
+        "figma",
+        "docs.google",
+        "drive.google",
+        "chatgpt",
+        "claude",
+        "udemy",
+        "coursera",
+        "edx",
+        "khanacademy",
+        "trello",
+        "jira",
+        "confluence",
+        "miro",
+    ],
+    "communication": [
+        "gmail",
+        "mail.",
+        "outlook",
+        "slack",
+        "discord",
+        "teams",
+        "zoom",
+        "meet.google",
+    ],
+    "social": [
+        "twitter",
+        "x.com",
+        "facebook",
+        "instagram",
+        "tiktok",
+        "snapchat",
+        "reddit",
+        "threads",
+    ],
+    "entertainment": [
+        "youtube",
+        "netflix",
+        "twitch",
+        "spotify",
+        "hulu",
+        "disney",
+        "primevideo",
+        "gaming",
+    ],
+    "news": ["news", "cnn", "bbc", "nytimes", "reuters", "medium.com", "techcrunch", "theverge"],
+    "shopping": ["amazon", "ebay", "shopify", "etsy", "walmart", "flipkart"],
 }
+
+
+def _categorise_domain(domain: str) -> str:
+    """Categorise a domain using keyword matching (fallback only)."""
+    domain_lower = domain.lower()
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        if any(kw in domain_lower for kw in keywords):
+            return category
+    return "other"
 
 
 # ---------------------------------------------------------------------------
@@ -342,11 +371,11 @@ def generate_fallback_insights(stats: dict) -> dict:
     """
     logger.info("Generating fallback (rule-based) insights")
 
-    # Categorise domains
+    # Categorise domains using keyword matching
     categories: dict[str, str] = {}
     for domain_info in stats.get("domains", []):
         domain = domain_info["domain"]
-        categories[domain] = DOMAIN_CATEGORIES.get(domain, "other")
+        categories[domain] = _categorise_domain(domain)
 
     # Productivity breakdown
     productive_time = 0
