@@ -26,6 +26,9 @@ const log = {
 
 // ─── DOM references ──────────────────────────────────────────────────
 const serverStatusEl = document.getElementById("serverStatus");
+const sessionSectionEl = document.getElementById("sessionSection");
+const sessionTimeStartedEl = document.getElementById("sessionTimeStarted");
+const sessionCurrentTabEl = document.getElementById("sessionCurrentTab");
 const emailSetupSection = document.getElementById("emailSetupSection");
 const emailConfiguredSection = document.getElementById("emailConfiguredSection");
 const emailInput = document.getElementById("emailInput");
@@ -38,12 +41,64 @@ const openDashboardBtn = document.getElementById("openDashboardBtn");
 // ─── Server status ───────────────────────────────────────────────────
 
 /**
+ * Format epoch ms as local time string (e.g. "2:30 PM").
+ * @param {number} epochMs
+ * @returns {string}
+ */
+function formatTimeStarted(epochMs) {
+  const d = new Date(epochMs);
+  return d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+/**
+ * Get domain from URL for display.
+ * @param {string} url
+ * @returns {string}
+ */
+function getDomainFromUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.hostname.replace(/^www\./, "") || url;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Load currentTab from storage and update session section (time started, current tab).
+ */
+function updateSessionInfo() {
+  chrome.storage.local.get(["currentTab"], (result) => {
+    if (chrome.runtime.lastError) {
+      sessionSectionEl.style.display = "none";
+      return;
+    }
+    const currentTab = result.currentTab || null;
+    if (!currentTab || !currentTab.url) {
+      sessionTimeStartedEl.textContent = "—";
+      sessionCurrentTabEl.textContent = "No tab being tracked";
+      sessionSectionEl.style.display = "block";
+      return;
+    }
+    sessionTimeStartedEl.textContent = formatTimeStarted(currentTab.startTime);
+    const label = currentTab.title || getDomainFromUrl(currentTab.url);
+    sessionCurrentTabEl.textContent = label.length > 40 ? label.slice(0, 37) + "…" : label;
+    sessionSectionEl.style.display = "block";
+  });
+}
+
+/**
  * Ping the BrowserFriend server and update the status badge.
  */
 async function checkServerStatus() {
   log.info("Checking server status...");
   serverStatusEl.textContent = "Checking...";
   serverStatusEl.className = "status-badge status-badge--checking";
+  sessionSectionEl.style.display = "none";
 
   try {
     const response = await fetch(API_STATUS, { signal: AbortSignal.timeout(3000) });
@@ -52,6 +107,7 @@ async function checkServerStatus() {
       log.info(`Server is running — database: ${data.database}`);
       serverStatusEl.textContent = "Tracking Active";
       serverStatusEl.className = "status-badge status-badge--active";
+      updateSessionInfo();
     } else {
       log.warn(`Server responded with status ${response.status}`);
       serverStatusEl.textContent = "Server Error";
