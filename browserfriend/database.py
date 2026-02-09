@@ -1,4 +1,5 @@
 """Database models and setup for BrowserFriend."""
+
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,23 +30,37 @@ Base = declarative_base()
 
 def extract_domain(url: str) -> str:
     """Extract domain from a URL.
-    
+
     Args:
         url: The URL to extract domain from
-        
+
     Returns:
         The domain name (e.g., 'google.com' from 'https://www.google.com/search')
     """
     try:
         parsed = urlparse(url)
-        domain = parsed.netloc or parsed.path.split('/')[0]
+        domain = parsed.netloc or parsed.path.split("/")[0]
         # Remove 'www.' prefix if present
-        if domain.startswith('www.'):
+        if domain.startswith("www."):
             domain = domain[4:]
-        return domain.lower() if domain else 'unknown'
+        return domain.lower() if domain else "unknown"
     except Exception as e:
         logger.warning(f"Failed to extract domain from URL '{url}': {e}")
-        return 'unknown'
+        return "unknown"
+
+
+class User(Base):
+    """Model representing a user."""
+
+    __tablename__ = "users"
+
+    email = Column(String, primary_key=True)
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    def __repr__(self):
+        return f"<User(email={self.email}, created_at={self.created_at})>"
 
 
 class BrowsingSession(Base):
@@ -55,12 +70,16 @@ class BrowsingSession(Base):
 
     session_id = Column(String, primary_key=True, default=lambda: str(uuid4()))
     user_email = Column(String, nullable=False, index=True)
-    start_time = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    start_time = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
     end_time = Column(DateTime, nullable=True)
     duration = Column(Float, nullable=True)  # Duration in seconds
 
     # Relationship to page visits
-    page_visits = relationship("PageVisit", back_populates="session", cascade="all, delete-orphan")
+    page_visits = relationship(
+        "PageVisit", back_populates="session", cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<BrowsingSession(session_id={self.session_id}, user_email={self.user_email}, start_time={self.start_time})>"
@@ -79,12 +98,16 @@ class PageVisit(Base):
     __tablename__ = "page_visits"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String, ForeignKey("browsing_sessions.session_id"), nullable=False, index=True)
+    session_id = Column(
+        String, ForeignKey("browsing_sessions.session_id"), nullable=False, index=True
+    )
     user_email = Column(String, nullable=False, index=True)
     url = Column(String, nullable=False)
     domain = Column(String, nullable=False, index=True)
     title = Column(String, nullable=True)
-    start_time = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    start_time = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
     end_time = Column(DateTime, nullable=True)
     duration_seconds = Column(Float, nullable=True)
 
@@ -109,6 +132,7 @@ Index("idx_page_visits_start_time", PageVisit.start_time)
 Index("idx_page_visits_user_email", PageVisit.user_email)
 Index("idx_browsing_sessions_user_email", BrowsingSession.user_email)
 Index("idx_browsing_sessions_start_time", BrowsingSession.start_time)
+Index("idx_users_email", User.email)
 
 
 # Database engine and session factory
@@ -122,11 +146,11 @@ def get_engine():
     if _engine is None:
         config = get_config()
         database_url = f"sqlite:///{config.database_path}"
-        
+
         # Ensure the directory exists
         db_path = Path(config.database_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         _engine = create_engine(
             database_url,
             connect_args={"check_same_thread": False},  # Needed for SQLite
@@ -207,7 +231,9 @@ def create_new_session(user_email: str) -> BrowsingSession:
         session.add(new_session)
         session.commit()
         session.refresh(new_session)
-        logger.info(f"Created new browsing session: {new_session.session_id} for user: {user_email}")
+        logger.info(
+            f"Created new browsing session: {new_session.session_id} for user: {user_email}"
+        )
         return new_session
     finally:
         session.close()
@@ -218,7 +244,11 @@ def end_session(session_id: str) -> Optional[BrowsingSession]:
     SessionLocal = get_session_factory()
     session = SessionLocal()
     try:
-        browsing_session = session.query(BrowsingSession).filter(BrowsingSession.session_id == session_id).first()
+        browsing_session = (
+            session.query(BrowsingSession)
+            .filter(BrowsingSession.session_id == session_id)
+            .first()
+        )
         if browsing_session:
             browsing_session.end_time = datetime.now(timezone.utc)
             browsing_session.calculate_duration()
@@ -239,14 +269,14 @@ def create_page_visit(
     start_time: Optional[datetime] = None,
 ) -> PageVisit:
     """Create a new page visit with automatic domain extraction.
-    
+
     Args:
         session_id: The browsing session ID
         user_email: The user's email address
         url: The page URL
         title: Optional page title
         start_time: Optional start time (defaults to now)
-        
+
     Returns:
         The created PageVisit object
     """
@@ -256,7 +286,7 @@ def create_page_visit(
         domain = extract_domain(url)
         if start_time is None:
             start_time = datetime.now(timezone.utc)
-        
+
         page_visit = PageVisit(
             session_id=session_id,
             user_email=user_email,
@@ -274,26 +304,30 @@ def create_page_visit(
         db_session.close()
 
 
-def get_sessions_by_user(user_email: str, limit: Optional[int] = None) -> List[BrowsingSession]:
+def get_sessions_by_user(
+    user_email: str, limit: Optional[int] = None
+) -> List[BrowsingSession]:
     """Get all sessions for a user, ordered by start_time descending.
-    
+
     Args:
         user_email: The user's email address
         limit: Optional limit on number of sessions to return
-        
+
     Returns:
         List of BrowsingSession objects
     """
     SessionLocal = get_session_factory()
     session = SessionLocal()
     try:
-        query = session.query(BrowsingSession).filter(
-            BrowsingSession.user_email == user_email
-        ).order_by(BrowsingSession.start_time.desc())
-        
+        query = (
+            session.query(BrowsingSession)
+            .filter(BrowsingSession.user_email == user_email)
+            .order_by(BrowsingSession.start_time.desc())
+        )
+
         if limit:
             query = query.limit(limit)
-        
+
         return query.all()
     finally:
         session.close()
@@ -301,24 +335,26 @@ def get_sessions_by_user(user_email: str, limit: Optional[int] = None) -> List[B
 
 def get_visits_by_user(user_email: str, limit: Optional[int] = None) -> List[PageVisit]:
     """Get all page visits for a user, ordered by start_time descending.
-    
+
     Args:
         user_email: The user's email address
         limit: Optional limit on number of visits to return
-        
+
     Returns:
         List of PageVisit objects
     """
     SessionLocal = get_session_factory()
     session = SessionLocal()
     try:
-        query = session.query(PageVisit).filter(
-            PageVisit.user_email == user_email
-        ).order_by(PageVisit.start_time.desc())
-        
+        query = (
+            session.query(PageVisit)
+            .filter(PageVisit.user_email == user_email)
+            .order_by(PageVisit.start_time.desc())
+        )
+
         if limit:
             query = query.limit(limit)
-        
+
         return query.all()
     finally:
         session.close()
@@ -326,30 +362,33 @@ def get_visits_by_user(user_email: str, limit: Optional[int] = None) -> List[Pag
 
 def get_visits_by_session(session_id: str) -> List[PageVisit]:
     """Get all page visits for a specific session.
-    
+
     Args:
         session_id: The browsing session ID
-        
+
     Returns:
         List of PageVisit objects
     """
     SessionLocal = get_session_factory()
     session = SessionLocal()
     try:
-        return session.query(PageVisit).filter(
-            PageVisit.session_id == session_id
-        ).order_by(PageVisit.start_time.asc()).all()
+        return (
+            session.query(PageVisit)
+            .filter(PageVisit.session_id == session_id)
+            .order_by(PageVisit.start_time.asc())
+            .all()
+        )
     finally:
         session.close()
 
 
 def get_top_domains_by_user(user_email: str, limit: int = 10) -> List[tuple]:
     """Get top visited domains for a user by visit count.
-    
+
     Args:
         user_email: The user's email address
         limit: Number of top domains to return (default: 10)
-        
+
     Returns:
         List of tuples (domain, count)
     """
@@ -357,7 +396,7 @@ def get_top_domains_by_user(user_email: str, limit: int = 10) -> List[tuple]:
     session = SessionLocal()
     try:
         results = (
-            session.query(PageVisit.domain, func.count(PageVisit.id).label('count'))
+            session.query(PageVisit.domain, func.count(PageVisit.id).label("count"))
             .filter(PageVisit.user_email == user_email)
             .group_by(PageVisit.domain)
             .order_by(func.count(PageVisit.id).desc())
@@ -371,10 +410,10 @@ def get_top_domains_by_user(user_email: str, limit: int = 10) -> List[tuple]:
 
 def get_total_time_by_user(user_email: str) -> float:
     """Get total browsing time (in seconds) for a user across all sessions.
-    
+
     Args:
         user_email: The user's email address
-        
+
     Returns:
         Total time in seconds
     """
@@ -385,7 +424,7 @@ def get_total_time_by_user(user_email: str) -> float:
             session.query(func.sum(BrowsingSession.duration))
             .filter(
                 BrowsingSession.user_email == user_email,
-                BrowsingSession.duration.isnot(None)
+                BrowsingSession.duration.isnot(None),
             )
             .scalar()
         )
@@ -396,19 +435,21 @@ def get_total_time_by_user(user_email: str) -> float:
 
 def get_user_email_from_session(session_id: str) -> Optional[str]:
     """Get user email from a session ID.
-    
+
     Args:
         session_id: The browsing session ID
-        
+
     Returns:
         User email or None if session not found
     """
     SessionLocal = get_session_factory()
     session = SessionLocal()
     try:
-        browsing_session = session.query(BrowsingSession).filter(
-            BrowsingSession.session_id == session_id
-        ).first()
+        browsing_session = (
+            session.query(BrowsingSession)
+            .filter(BrowsingSession.session_id == session_id)
+            .first()
+        )
         return browsing_session.user_email if browsing_session else None
     finally:
         session.close()
