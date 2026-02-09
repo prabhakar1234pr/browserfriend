@@ -21,6 +21,9 @@ const API_STATUS = `${API_BASE}/api/status`;
 /** Minimum duration (seconds) a tab must be active before we report it. */
 const MIN_DURATION_SECONDS = 2;
 
+/** Interval (ms) for polling server status. When server comes online, we capture the current tab. */
+const SERVER_POLL_INTERVAL_MS = 5000;
+
 /** URL prefixes that should never be tracked. */
 const IGNORED_URL_PREFIXES = [
   "chrome://",
@@ -167,6 +170,50 @@ async function getActiveTab() {
       resolve(tabs && tabs.length > 0 ? tabs[0] : null);
     });
   });
+}
+
+/**
+ * Get the last known server-online state from storage.
+ *
+ * @returns {Promise<boolean|null>}  true/false or null if never set
+ */
+async function getServerWasOnline() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["serverWasOnline"], (result) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      const v = result.serverWasOnline;
+      resolve(v === true || v === false ? v : null);
+    });
+  });
+}
+
+/**
+ * Save the server-online state to storage.
+ *
+ * @param {boolean} online
+ * @returns {Promise<void>}
+ */
+async function setServerWasOnline(online) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ serverWasOnline: online }, () => resolve());
+  });
+}
+
+/**
+ * Check if the BrowserFriend server is reachable.
+ *
+ * @returns {Promise<boolean>}
+ */
+async function checkServerOnline() {
+  try {
+    const response = await fetch(API_STATUS, { signal: AbortSignal.timeout(3000) });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -389,6 +436,31 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
   }
 });
 
+// ─── Server status polling ───────────────────────────────────────────
+
+/**
+ * Poll server status. When server transitions from offline to online,
+ * start tracking the current active tab (so already-open tabs are captured).
+ * When server goes offline, finalize the current tab.
+ */
+async function pollServerStatus() {
+  const serverIsOnline = await checkServerOnline();
+  const serverWasOnline = await getServerWasOnline();
+
+  if (serverWasOnline === false && serverIsOnline === true) {
+    log.info("pollServerStatus: server came online — capturing current tab");
+    const tab = await getActiveTab();
+    if (tab) {
+      await startTrackingTab(tab);
+    }
+  } else if (serverWasOnline === true && serverIsOnline === false) {
+    log.info("pollServerStatus: server went offline — finalizing current tab");
+    await finalizePreviousTab("server-offline");
+  }
+
+  await setServerWasOnline(serverIsOnline);
+}
+
 // ─── Service worker lifecycle ────────────────────────────────────────
 
 /**
@@ -418,5 +490,9 @@ chrome.runtime.onStartup.addListener(async () => {
     await startTrackingTab(tab);
   }
 });
+
+// Start server status polling: run once immediately, then every SERVER_POLL_INTERVAL_MS
+pollServerStatus();
+setInterval(pollServerStatus, SERVER_POLL_INTERVAL_MS);
 
 log.info("Service worker loaded — BrowserFriend tab tracking active");

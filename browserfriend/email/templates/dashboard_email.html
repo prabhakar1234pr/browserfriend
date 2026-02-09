@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrowserFriend Dashboard - {{ date }}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f7fa; font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased;">
+    <!-- Wrapper Table -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f7fa;">
+        <tr>
+            <td align="center" style="padding: 20px 10px;">
+                <!-- Main Container -->
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #1a73e8 0%, #4285f4 50%, #669df6 100%); padding: 32px 30px; text-align: center;">
+                            <h1 style="margin: 0 0 8px 0; font-size: 26px; color: #ffffff; font-weight: 700; letter-spacing: -0.5px;">BrowserFriend</h1>
+                            <p style="margin: 0 0 4px 0; font-size: 14px; color: rgba(255,255,255,0.85);">Session Dashboard &mdash; {{ date }}</p>
+                            <p style="margin: 0; font-size: 13px; color: rgba(255,255,255,0.7);">{{ email }}</p>
+                        </td>
+                    </tr>
+
+                    <!-- Statistics Cards -->
+                    <tr>
+                        <td style="padding: 24px 30px 0 30px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td width="50%" style="padding: 0 6px 12px 0;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f0f6ff; border-radius: 8px; padding: 16px;">
+                                            <tr>
+                                                <td style="padding: 16px; text-align: center;">
+                                                    <p style="margin: 0 0 4px 0; font-size: 12px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px;">Total Time</p>
+                                                    <p style="margin: 0; font-size: 22px; font-weight: 700; color: #1a73e8;">{{ total_time }}</p>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                    <td width="50%" style="padding: 0 0 12px 6px;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f0f6ff; border-radius: 8px; padding: 16px;">
+                                            <tr>
+                                                <td style="padding: 16px; text-align: center;">
+                                                    <p style="margin: 0 0 4px 0; font-size: 12px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px;">Pages Visited</p>
+                                                    <p style="margin: 0; font-size: 22px; font-weight: 700; color: #1a73e8;">{{ total_visits }}</p>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td width="50%" style="padding: 0 6px 0 0;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f0f6ff; border-radius: 8px; padding: 16px;">
+                                            <tr>
+                                                <td style="padding: 16px; text-align: center;">
+                                                    <p style="margin: 0 0 4px 0; font-size: 12px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px;">Unique Domains</p>
+                                                    <p style="margin: 0; font-size: 22px; font-weight: 700; color: #1a73e8;">{{ unique_domains }}</p>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                    <td width="50%" style="padding: 0 0 0 6px;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: {% if productivity_score >= 70 %}#e8f5e9{% elif productivity_score >= 40 %}#fff8e1{% else %}#fce4ec{% endif %}; border-radius: 8px; padding: 16px;">
+                                            <tr>
+                                                <td style="padding: 16px; text-align: center;">
+                                                    <p style="margin: 0 0 4px 0; font-size: 12px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px;">Productivity</p>
+                                                    <p style="margin: 0; font-size: 22px; font-weight: 700; color: {% if productivity_score >= 70 %}#2e7d32{% elif productivity_score >= 40 %}#f57f17{% else %}#c62828{% endif %};">{{ productivity_score }}/100</p>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Productivity Breakdown -->
+                    <tr>
+                        <td style="padding: 24px 30px 0 30px;">
+                            <h2 style="margin: 0 0 16px 0; font-size: 18px; color: #202124; border-bottom: 2px solid #e8eaed; padding-bottom: 8px;">Productivity Breakdown</h2>
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                {% set prod_pct = productivity_breakdown.get('productive_time', 0) %}
+                                {% set neut_pct = productivity_breakdown.get('neutral_time', 0) %}
+                                {% set dist_pct = productivity_breakdown.get('distracting_time', 0) %}
+                                <!-- Productive -->
+                                <tr>
+                                    <td style="padding: 4px 0;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td width="100" style="font-size: 13px; color: #5f6368;">Productive</td>
+                                                <td style="padding: 0 10px;">
+                                                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #e8eaed; border-radius: 4px; height: 12px;">
+                                                        <tr>
+                                                            <td style="width: {{ prod_pct }}%; background-color: #4CAF50; border-radius: 4px; height: 12px;"></td>
+                                                            <td style="height: 12px;"></td>
+                                                        </tr>
+                                                    </table>
+                                                </td>
+                                                <td width="40" style="font-size: 13px; color: #4CAF50; font-weight: 600; text-align: right;">{{ prod_pct }}%</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <!-- Neutral -->
+                                <tr>
+                                    <td style="padding: 4px 0;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td width="100" style="font-size: 13px; color: #5f6368;">Neutral</td>
+                                                <td style="padding: 0 10px;">
+                                                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #e8eaed; border-radius: 4px; height: 12px;">
+                                                        <tr>
+                                                            <td style="width: {{ neut_pct }}%; background-color: #FF9800; border-radius: 4px; height: 12px;"></td>
+                                                            <td style="height: 12px;"></td>
+                                                        </tr>
+                                                    </table>
+                                                </td>
+                                                <td width="40" style="font-size: 13px; color: #FF9800; font-weight: 600; text-align: right;">{{ neut_pct }}%</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <!-- Distracting -->
+                                <tr>
+                                    <td style="padding: 4px 0;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td width="100" style="font-size: 13px; color: #5f6368;">Distracting</td>
+                                                <td style="padding: 0 10px;">
+                                                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #e8eaed; border-radius: 4px; height: 12px;">
+                                                        <tr>
+                                                            <td style="width: {{ dist_pct }}%; background-color: #E91E63; border-radius: 4px; height: 12px;"></td>
+                                                            <td style="height: 12px;"></td>
+                                                        </tr>
+                                                    </table>
+                                                </td>
+                                                <td width="40" style="font-size: 13px; color: #E91E63; font-weight: 600; text-align: right;">{{ dist_pct }}%</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Top Domains -->
+                    {% if top_domains %}
+                    <tr>
+                        <td style="padding: 24px 30px 0 30px;">
+                            <h2 style="margin: 0 0 16px 0; font-size: 18px; color: #202124; border-bottom: 2px solid #e8eaed; padding-bottom: 8px;">Top Domains</h2>
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                <!-- Table Header -->
+                                <tr style="background-color: #f8f9fa;">
+                                    <td style="padding: 8px 10px; font-size: 11px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">#</td>
+                                    <td style="padding: 8px 10px; font-size: 11px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Domain</td>
+                                    <td style="padding: 8px 10px; font-size: 11px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; text-align: right;">Time</td>
+                                    <td style="padding: 8px 10px; font-size: 11px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; text-align: right;">%</td>
+                                    <td style="padding: 8px 10px; font-size: 11px; color: #5f6368; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Category</td>
+                                </tr>
+                                {% for domain in top_domains[:10] %}
+                                {% set cat = categories.get(domain.domain, 'other') %}
+                                <tr style="border-bottom: 1px solid #e8eaed;">
+                                    <td style="padding: 10px; font-size: 13px; color: #5f6368;">{{ loop.index }}</td>
+                                    <td style="padding: 10px; font-size: 13px; color: #202124; font-weight: 500;">{{ domain.domain }}</td>
+                                    <td style="padding: 10px; font-size: 13px; color: #202124; text-align: right;">{{ format_duration(domain.total_time) }}</td>
+                                    <td style="padding: 10px; font-size: 13px; color: #202124; text-align: right;">{{ '%.1f' % domain.percentage }}%</td>
+                                    <td style="padding: 10px;">
+                                        <span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; color: #ffffff; background-color: {{ get_category_color(cat) }};">{{ cat }}</span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- Time Distribution -->
+                    {% if time_distribution %}
+                    <tr>
+                        <td style="padding: 24px 30px 0 30px;">
+                            <h2 style="margin: 0 0 16px 0; font-size: 18px; color: #202124; border-bottom: 2px solid #e8eaed; padding-bottom: 8px;">Time Distribution</h2>
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                {% set periods = [('Morning (6am-12pm)', time_distribution.get('morning', 0), '#FF9800'), ('Afternoon (12pm-6pm)', time_distribution.get('afternoon', 0), '#4285f4'), ('Evening (6pm-12am)', time_distribution.get('evening', 0), '#9C27B0'), ('Night (12am-6am)', time_distribution.get('night', 0), '#5f6368')] %}
+                                {% set max_time = [periods[0][1], periods[1][1], periods[2][1], periods[3][1]] | max %}
+                                {% for label, seconds, color in periods %}
+                                <tr>
+                                    <td style="padding: 6px 0;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td width="160" style="font-size: 13px; color: #5f6368;">{{ label }}</td>
+                                                <td style="padding: 0 10px;">
+                                                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #e8eaed; border-radius: 4px; height: 10px;">
+                                                        <tr>
+                                                            <td style="width: {% if max_time > 0 %}{{ (seconds / max_time * 100) | int }}{% else %}0{% endif %}%; background-color: {{ color }}; border-radius: 4px; height: 10px;"></td>
+                                                            <td style="height: 10px;"></td>
+                                                        </tr>
+                                                    </table>
+                                                </td>
+                                                <td width="50" style="font-size: 13px; color: #202124; font-weight: 500; text-align: right;">{{ format_duration(seconds) }}</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- AI Summary -->
+                    {% if summary %}
+                    <tr>
+                        <td style="padding: 24px 30px 0 30px;">
+                            <h2 style="margin: 0 0 16px 0; font-size: 18px; color: #202124; border-bottom: 2px solid #e8eaed; padding-bottom: 8px;">AI Insights</h2>
+                            <p style="margin: 0; font-size: 14px; color: #3c4043; line-height: 1.6;">{{ summary }}</p>
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- Patterns -->
+                    {% if patterns %}
+                    <tr>
+                        <td style="padding: 20px 30px 0 30px;">
+                            <h3 style="margin: 0 0 12px 0; font-size: 15px; color: #202124;">Patterns Detected</h3>
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                {% for pattern in patterns %}
+                                <tr>
+                                    <td style="padding: 4px 0; font-size: 13px; color: #3c4043; line-height: 1.5;">
+                                        <span style="color: #1a73e8; margin-right: 6px;">&#9679;</span>{{ pattern }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- Recommendations -->
+                    {% if recommendations %}
+                    <tr>
+                        <td style="padding: 20px 30px 0 30px;">
+                            <h2 style="margin: 0 0 16px 0; font-size: 18px; color: #202124; border-bottom: 2px solid #e8eaed; padding-bottom: 8px;">Recommendations</h2>
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                {% for rec in recommendations %}
+                                <tr>
+                                    <td style="padding: 6px 0;">
+                                        <table role="presentation" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td valign="top" style="padding-right: 10px; font-size: 16px; color: #4CAF50;">&#10003;</td>
+                                                <td style="font-size: 13px; color: #3c4043; line-height: 1.5;">{{ rec }}</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding: 30px 30px 24px 30px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top: 2px solid #e8eaed; padding-top: 20px;">
+                                <tr>
+                                    <td style="text-align: center;">
+                                        <p style="margin: 0 0 4px 0; font-size: 12px; color: #9aa0a6;">Generated on {{ generated_at[:10] if generated_at|length > 10 else generated_at }}</p>
+                                        <p style="margin: 0 0 4px 0; font-size: 12px; color: #9aa0a6;">Session ID: {{ session_id[:8] }}...</p>
+                                        <p style="margin: 0; font-size: 11px; color: #bdc1c6;">BrowserFriend &mdash; Track, Analyse, Understand</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                </table>
+                <!-- End Main Container -->
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

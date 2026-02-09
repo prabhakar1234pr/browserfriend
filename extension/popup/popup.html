@@ -21,6 +21,18 @@
     </div>
   </section>
 
+  <!-- Session / tracking info (shown when server is online) -->
+  <section class="session-section" id="sessionSection" style="display: none;">
+    <div class="session-row" id="sessionTimeRow">
+      <span class="session-label">Time started</span>
+      <span class="session-value" id="sessionTimeStarted">—</span>
+    </div>
+    <div class="session-row" id="sessionTabRow">
+      <span class="session-label">Tracking</span>
+      <span class="session-value session-value--ellipsis" id="sessionCurrentTab">—</span>
+    </div>
+  </section>
+
   <!-- Email section: Not configured -->
   <section class="email-section" id="emailSetupSection" style="display: none;">
     <p class="email-section__prompt">Enter your email to start tracking:</p>

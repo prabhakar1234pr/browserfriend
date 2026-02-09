@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     create_engine,
     func,
 )
@@ -123,6 +125,28 @@ class PageVisit(Base):
             delta = self.end_time - self.start_time
             self.duration_seconds = delta.total_seconds()
         return self.duration_seconds
+
+
+class Dashboard(Base):
+    """Store generated dashboards for historical viewing."""
+
+    __tablename__ = "dashboards"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, ForeignKey("browsing_sessions.session_id"), nullable=False)
+    user_email = Column(String, nullable=False, index=True)
+    insights_json = Column(Text, nullable=False)  # JSON string of LLM insights
+    html_content = Column(Text, nullable=False)  # Full HTML email
+    sent_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    email_sent = Column(Boolean, default=True)
+
+    session = relationship("BrowsingSession", backref="dashboards")
+
+    def __repr__(self):
+        return (
+            f"<Dashboard(id={self.id}, session_id={self.session_id}, "
+            f"user_email={self.user_email}, sent_at={self.sent_at})>"
+        )
 
 
 # Create indexes for common queries
@@ -536,3 +560,43 @@ def get_user_email_from_session(session_id: str) -> Optional[str]:
         return browsing_session.user_email if browsing_session else None
     finally:
         session.close()
+
+
+def save_dashboard(
+    session_id: str, user_email: str, insights: dict, html_content: str
+) -> Optional[Dashboard]:
+    """Save generated dashboard to database for historical viewing.
+
+    Args:
+        session_id: Session UUID
+        user_email: User's email address
+        insights: Full insights dictionary
+        html_content: Rendered HTML email
+
+    Returns:
+        Created Dashboard object, or None on failure
+    """
+    import json
+
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        dashboard = Dashboard(
+            session_id=session_id,
+            user_email=user_email,
+            insights_json=json.dumps(insights),
+            html_content=html_content,
+            sent_at=datetime.now(timezone.utc),
+            email_sent=True,
+        )
+        db.add(dashboard)
+        db.commit()
+        db.refresh(dashboard)
+        logger.info("Saved dashboard %d for session %s", dashboard.id, session_id)
+        return dashboard
+    except Exception as exc:
+        logger.error("Failed to save dashboard: %s", exc)
+        db.rollback()
+        return None
+    finally:
+        db.close()

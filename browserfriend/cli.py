@@ -736,8 +736,10 @@ def status() -> None:
 
 
 @app.command()
-def dashboard() -> None:
-    """Generate AI-powered dashboard with browsing insights."""
+def dashboard(
+    session_id: Optional[str] = typer.Option(None, help="Specific session ID (default: latest)"),
+) -> None:
+    """Generate AI-powered dashboard with browsing insights and send via email."""
     logger.info("=" * 60)
     logger.info("CLI command: dashboard")
     logger.info("=" * 60)
@@ -757,19 +759,26 @@ def dashboard() -> None:
             "Warning: Server is currently running. Consider stopping it first with `bf stop`."
         )
 
-    # Get latest session for this user
+    # Get session for this user
     try:
         from browserfriend.database import BrowsingSession, get_session_factory
 
         SessionLocal = get_session_factory()
         db_session = SessionLocal()
         try:
-            session = (
-                db_session.query(BrowsingSession)
-                .filter(BrowsingSession.user_email == user_email)
-                .order_by(BrowsingSession.start_time.desc())
-                .first()
-            )
+            if session_id:
+                session = (
+                    db_session.query(BrowsingSession)
+                    .filter(BrowsingSession.session_id == session_id)
+                    .first()
+                )
+            else:
+                session = (
+                    db_session.query(BrowsingSession)
+                    .filter(BrowsingSession.user_email == user_email)
+                    .order_by(BrowsingSession.start_time.desc())
+                    .first()
+                )
             if not session:
                 logger.error("No browsing sessions found for user: %s", user_email)
                 typer.echo(
@@ -788,18 +797,12 @@ def dashboard() -> None:
         typer.echo(f"Error: Failed to query sessions: {exc}")
         raise typer.Exit(code=1)
 
-    typer.echo(f"Analyzing session {target_session_id}...")
-    typer.echo("Generating AI insights with Gemini...")
-    typer.echo("")
-
     # Generate insights
     try:
         from browserfriend.llm import InsufficientDataError, LLMError
         from browserfriend.llm.analyzer import generate_insights
-        from browserfriend.llm.display import display_insights
 
         insights = generate_insights(target_session_id)
-        display_insights(insights)
 
     except InsufficientDataError as exc:
         logger.error("Insufficient data: %s", exc)
@@ -814,8 +817,40 @@ def dashboard() -> None:
         typer.echo(f"Error: Failed to generate dashboard: {exc}")
         raise typer.Exit(code=1)
 
-    typer.echo("")
-    typer.echo("Email delivery coming in Issue #6")
+    # Render HTML email
+    try:
+        from browserfriend.email.renderer import render_dashboard_email
+
+        html_content = render_dashboard_email(insights, insights["stats"], user_email)
+        logger.info("Email template rendered (%d chars)", len(html_content))
+    except Exception as exc:
+        logger.error("Email rendering failed: %s", exc, exc_info=True)
+        typer.echo(f"Error: Failed to render email template: {exc}")
+        raise typer.Exit(code=1)
+
+    # Send email
+    try:
+        from browserfriend.email.sender import send_dashboard_email
+
+        if send_dashboard_email(user_email, html_content):
+            typer.echo(f"Check your email! Dashboard sent to {user_email}")
+            logger.info("Dashboard email sent to %s", user_email)
+        else:
+            typer.echo("Failed to send email. Check your SMTP settings in .env")
+            logger.error("send_dashboard_email returned False")
+    except Exception as exc:
+        logger.error("Email sending failed: %s", exc, exc_info=True)
+        typer.echo(f"Error: Failed to send email: {exc}")
+
+    # Save dashboard to database
+    try:
+        from browserfriend.database import save_dashboard
+
+        save_dashboard(target_session_id, user_email, insights, html_content)
+        logger.info("Dashboard saved to database")
+    except Exception as exc:
+        logger.warning("Failed to save dashboard to database: %s", exc)
+
     logger.info("Dashboard command completed successfully")
 
 

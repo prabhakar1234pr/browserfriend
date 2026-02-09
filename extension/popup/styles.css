@@ -86,6 +86,45 @@ body {
   color: #856404;
 }
 
+/* ─── Session section ─────────────────────────────────────────────── */
+.session-section {
+  padding: 10px 20px 12px;
+  border-bottom: 1px solid #e8e8ef;
+  background: #f8f9fc;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.session-row:last-child {
+  margin-bottom: 0;
+}
+
+.session-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  flex-shrink: 0;
+}
+
+.session-value {
+  font-size: 12px;
+  color: #1a1a2e;
+  text-align: right;
+}
+
+.session-value--ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
 /* ─── Email sections ──────────────────────────────────────────────── */
 .email-section,
 .email-configured {
