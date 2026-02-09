@@ -3,12 +3,15 @@
 Provides commands: setup, start, stop, status, dashboard.
 """
 
+import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -62,6 +65,12 @@ def _setup_cli_logging() -> logging.Logger:
 logger = _setup_cli_logging()
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+# ---------------------------------------------------------------------------
 # Typer app
 # ---------------------------------------------------------------------------
 
@@ -72,30 +81,66 @@ app = typer.Typer(
 )
 
 # ---------------------------------------------------------------------------
-# Helpers – PID file management
+# Helpers – PID file management (JSON: pid, session_id, started_at)
 # ---------------------------------------------------------------------------
 
 PID_DIR = Path.home() / ".browserfriend"
 PID_FILE = PID_DIR / "server.pid"
 
 
-def _read_pid() -> Optional[int]:
-    """Read PID from the PID file. Returns None if file missing or invalid."""
+def _read_pid_data() -> Optional[dict]:
+    """Read PID data (pid, session_id, started_at) from JSON PID file.
+
+    Also handles legacy plain-integer PID files for backward compat.
+    Returns None if file missing or invalid.
+    """
     logger.debug("Attempting to read PID file: %s", PID_FILE)
     if not PID_FILE.exists():
         logger.debug("PID file does not exist")
         return None
     try:
-        pid = int(PID_FILE.read_text().strip())
-        logger.debug("Read PID %d from file", pid)
-        return pid
+        raw = PID_FILE.read_text().strip()
+        # Try JSON dict first
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                logger.debug("Read PID data from JSON: %s", data)
+                return data
+            # json.loads("555") returns int – treat as legacy
+            raise json.JSONDecodeError("not a dict", raw, 0)
+        except json.JSONDecodeError:
+            # Legacy plain-integer format
+            pid = int(raw)
+            logger.debug("Read legacy PID %d from file (no session_id)", pid)
+            return {"pid": pid, "session_id": None, "started_at": None}
     except (ValueError, OSError) as exc:
         logger.warning("Failed to read PID file: %s", exc)
         return None
 
 
+def _read_pid() -> Optional[int]:
+    """Read PID from the PID file. Returns None if file missing or invalid."""
+    data = _read_pid_data()
+    if data is None:
+        return None
+    return data.get("pid")
+
+
+def _write_pid_data(pid: int, session_id: str) -> None:
+    """Write PID + session_id + started_at to the PID file as JSON."""
+    data = {
+        "pid": pid,
+        "session_id": session_id,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    logger.debug("Writing PID data to %s: %s", PID_FILE, data)
+    PID_DIR.mkdir(exist_ok=True)
+    PID_FILE.write_text(json.dumps(data))
+    logger.info("PID data written to %s (pid=%d, session=%s)", PID_FILE, pid, session_id)
+
+
 def _write_pid(pid: int) -> None:
-    """Write PID to the PID file."""
+    """Write PID to the PID file (legacy helper, prefer _write_pid_data)."""
     logger.debug("Writing PID %d to %s", pid, PID_FILE)
     PID_DIR.mkdir(exist_ok=True)
     PID_FILE.write_text(str(pid))
@@ -113,17 +158,51 @@ def _delete_pid() -> None:
 
 
 def _is_server_running(pid: Optional[int] = None) -> bool:
-    """Check if the BrowserFriend server process is running."""
+    """Check if the BrowserFriend server process is running.
+
+    Verifies both that the process exists AND that it is actually our
+    server (by inspecting the command line) to avoid false positives
+    from PID reuse.  (Issue 4 fix)
+    """
     if pid is None:
         pid = _read_pid()
     if pid is None:
         logger.debug("No PID available – server not running")
         return False
+
     try:
         proc = psutil.Process(pid)
-        is_running = proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
-        logger.debug("Process %d running=%s, status=%s", pid, is_running, proc.status())
-        return is_running
+
+        # Basic liveness check
+        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
+            logger.debug("Process %d not alive (status=%s)", pid, proc.status())
+            return False
+
+        # Verify the process is actually our server (Issue 4)
+        try:
+            cmdline = " ".join(proc.cmdline()).lower()
+            logger.debug("Process %d cmdline: %s", pid, cmdline)
+            is_ours = "browserfriend" in cmdline or "main.py" in cmdline or "uvicorn" in cmdline
+            if not is_ours:
+                logger.warning(
+                    "Process %d exists but is NOT BrowserFriend server (cmdline: %s). "
+                    "Cleaning up stale PID file.",
+                    pid,
+                    cmdline,
+                )
+                _delete_pid()
+                return False
+            logger.debug("Process %d verified as BrowserFriend server", pid)
+            return True
+        except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            # Cannot read cmdline – fall back to assuming it's ours
+            logger.debug(
+                "Cannot read cmdline for PID %d (%s), assuming it is our server",
+                pid,
+                exc,
+            )
+            return True
+
     except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
         logger.debug("Process %d not accessible: %s", pid, exc)
         return False
@@ -185,15 +264,15 @@ def setup() -> None:
     email = typer.prompt("Enter your email address")
     logger.info("User entered email: %s", email)
 
-    # Validate email format (basic check)
-    if "@" not in email or "." not in email.split("@")[-1]:
+    # Validate email format with proper regex (Issue 6 fix)
+    if not EMAIL_REGEX.match(email):
         logger.error("Invalid email format: %s", email)
         typer.echo("Error: Invalid email format. Please provide a valid email.")
         raise typer.Exit(code=1)
 
-    logger.debug("Email validation passed")
+    logger.debug("Email validation passed (regex)")
 
-    # Store in database via database module
+    # Store in database directly (Issue 9 fix – no dependency on running server)
     try:
         from browserfriend.database import User, get_session_factory, init_database
 
@@ -291,6 +370,28 @@ def start() -> None:
         typer.echo(f"Error: Failed to initialise database: {exc}")
         raise typer.Exit(code=1)
 
+    # ── Issue 3 fix: create session BEFORE starting server ──
+    # This prevents the race where the extension hits the server before a
+    # session exists, causing get_or_create_active_session to spawn a
+    # duplicate session.
+    try:
+        from browserfriend.database import (
+            BrowsingSession,
+            create_new_session,
+            get_session_factory,
+        )
+
+        logger.info("Creating browsing session before server start")
+        browsing_session = create_new_session(user_email)
+        session_id = browsing_session.session_id
+        logger.info(
+            "Browsing session created: session_id=%s, user=%s", session_id, user_email
+        )
+    except Exception as exc:
+        logger.error("Failed to create browsing session: %s", exc, exc_info=True)
+        typer.echo(f"Error: Failed to create session: {exc}")
+        raise typer.Exit(code=1)
+
     # Start server as background process
     logger.info("Starting FastAPI server in background")
     try:
@@ -318,10 +419,21 @@ def start() -> None:
             **kwargs,
         )
         logger.info("Server process started with PID %d", proc.pid)
-        _write_pid(proc.pid)
+
+        # Issue 7 fix: store pid + session_id together in PID file
+        _write_pid_data(proc.pid, session_id)
 
     except Exception as exc:
         logger.error("Failed to start server process: %s", exc, exc_info=True)
+        # Issue 3 fix: clean up the session we just created
+        logger.info("Cleaning up session %s after server start failure", session_id)
+        try:
+            from browserfriend.database import end_session
+
+            end_session(session_id)
+            logger.info("Cleaned up session %s", session_id)
+        except Exception as cleanup_exc:
+            logger.warning("Failed to clean up session: %s", cleanup_exc)
         typer.echo(f"Error: Failed to start server: {exc}")
         raise typer.Exit(code=1)
 
@@ -331,23 +443,16 @@ def start() -> None:
     if not _is_server_running(proc.pid):
         logger.error("Server process died shortly after starting (PID %d)", proc.pid)
         _delete_pid()
+        # Issue 3 fix: clean up session on failure
+        try:
+            from browserfriend.database import end_session
+
+            end_session(session_id)
+        except Exception:
+            pass
         typer.echo("Error: Server failed to start. Check logs for details.")
         raise typer.Exit(code=1)
     logger.info("Server process verified running (PID %d)", proc.pid)
-
-    # Create a new browsing session
-    try:
-        from browserfriend.database import create_new_session
-
-        session = create_new_session(user_email)
-        session_id = session.session_id
-        logger.info(
-            "Browsing session created: session_id=%s, user=%s", session_id, user_email
-        )
-    except Exception as exc:
-        logger.error("Failed to create browsing session: %s", exc, exc_info=True)
-        typer.echo(f"Warning: Server started but session creation failed: {exc}")
-        session_id = "unknown"
 
     typer.echo(f"Server started on http://{config.server_host}:{config.server_port}")
     typer.echo(f"Session ID: {session_id}")
@@ -366,13 +471,27 @@ def stop() -> None:
     logger.info("CLI command: stop")
     logger.info("=" * 60)
 
-    pid = _read_pid()
-    if pid is None:
+    # Issue 7 fix: read full PID data (pid + session_id)
+    pid_data = _read_pid_data()
+    if pid_data is None:
         logger.warning("No PID file found – server not running")
         typer.echo("Error: Server is not running (no PID file found).")
         raise typer.Exit(code=1)
 
-    logger.info("PID from file: %d", pid)
+    pid = pid_data.get("pid")
+    stored_session_id = pid_data.get("session_id")
+    logger.info(
+        "PID data from file: pid=%s, session_id=%s, started_at=%s",
+        pid,
+        stored_session_id,
+        pid_data.get("started_at"),
+    )
+
+    if pid is None:
+        logger.warning("PID file exists but has no pid value")
+        _delete_pid()
+        typer.echo("Error: Corrupt PID file. Cleaned up.")
+        raise typer.Exit(code=1)
 
     if not _is_server_running(pid):
         logger.warning("Process %d is not running – cleaning up stale PID", pid)
@@ -381,6 +500,7 @@ def stop() -> None:
         raise typer.Exit(code=1)
 
     # End the active browsing session
+    # Issue 8 fix: use stored session_id from PID file when available
     user_email = _get_user_email()
     session_summary = None
     if user_email:
@@ -393,10 +513,24 @@ def stop() -> None:
                 get_visits_by_session,
             )
 
-            current_session = get_current_session(user_email)
-            if current_session:
-                logger.info("Active session found: %s", current_session.session_id)
-                ended = end_session(current_session.session_id)
+            # Prefer stored session_id (Issue 8), fall back to DB query
+            target_session_id = stored_session_id
+            if target_session_id:
+                logger.info(
+                    "Using stored session_id from PID file: %s", target_session_id
+                )
+            else:
+                logger.info(
+                    "No session_id in PID file, querying DB for active session"
+                )
+                current_session = get_current_session(user_email)
+                target_session_id = (
+                    current_session.session_id if current_session else None
+                )
+
+            if target_session_id:
+                logger.info("Ending session: %s", target_session_id)
+                ended = end_session(target_session_id)
                 if ended:
                     visits = get_visits_by_session(ended.session_id)
                     top_domains = get_top_domains_by_user(user_email, limit=3)
@@ -416,8 +550,9 @@ def stop() -> None:
                     )
                 else:
                     logger.warning(
-                        "end_session returned None for session %s",
-                        current_session.session_id,
+                        "end_session returned None for session %s "
+                        "(may already be ended)",
+                        target_session_id,
                     )
             else:
                 logger.info("No active session found for user %s", user_email)
@@ -425,10 +560,30 @@ def stop() -> None:
             logger.error("Failed to end session: %s", exc, exc_info=True)
             typer.echo(f"Warning: Could not end session cleanly: {exc}")
 
-    # Terminate the server process
+    # Issue 5 fix: verify process identity before terminating
     logger.info("Terminating server process PID %d", pid)
     try:
         proc = psutil.Process(pid)
+
+        # Verify it's our server before killing (Issue 5)
+        try:
+            cmdline = " ".join(proc.cmdline()).lower()
+            if "browserfriend" not in cmdline and "main.py" not in cmdline and "uvicorn" not in cmdline:
+                logger.warning(
+                    "Process %d is NOT BrowserFriend server (cmdline: %s). "
+                    "Will not terminate. Cleaning up PID file.",
+                    pid,
+                    cmdline,
+                )
+                _delete_pid()
+                typer.echo(
+                    f"Warning: Process {pid} is not BrowserFriend server. "
+                    "PID file cleaned up."
+                )
+                return
+        except (psutil.AccessDenied, psutil.ZombieProcess):
+            logger.debug("Cannot verify cmdline for PID %d, proceeding with termination", pid)
+
         if sys.platform == "win32":
             logger.debug("Windows: calling proc.terminate()")
             proc.terminate()
@@ -515,7 +670,9 @@ def status() -> None:
         logger.debug("Querying session info for user: %s", user_email)
         try:
             from browserfriend.database import (
+                PageVisit,
                 get_current_session,
+                get_session_factory,
                 get_visits_by_session,
                 get_visits_by_user,
             )
@@ -528,6 +685,36 @@ def status() -> None:
                 typer.echo(f"  Session ID : {active_session.session_id}")
                 typer.echo(f"  Started    : {active_session.start_time}")
                 typer.echo(f"  Visits     : {len(visits_in_session)}")
+
+                # Issue 10 fix: warn if session may be stale (>30 min inactive)
+                if visits_in_session:
+                    SessionLocal = get_session_factory()
+                    db_session = SessionLocal()
+                    try:
+                        last_visit = (
+                            db_session.query(PageVisit)
+                            .filter(PageVisit.session_id == active_session.session_id)
+                            .order_by(PageVisit.end_time.desc())
+                            .first()
+                        )
+                        if last_visit and last_visit.end_time:
+                            last_end = last_visit.end_time
+                            if last_end.tzinfo is None:
+                                last_end = last_end.replace(tzinfo=timezone.utc)
+                            time_since = datetime.now(timezone.utc) - last_end
+                            if time_since > timedelta(minutes=30):
+                                typer.echo(
+                                    f"  WARNING: Session may be stale (>30 min inactive, "
+                                    f"last activity {_format_duration(time_since.total_seconds())} ago)"
+                                )
+                                logger.warning(
+                                    "Active session %s may be stale (last activity %s ago)",
+                                    active_session.session_id,
+                                    time_since,
+                                )
+                    finally:
+                        db_session.close()
+
                 logger.info(
                     "Active session: id=%s, start=%s, visits=%d",
                     active_session.session_id,
@@ -582,19 +769,23 @@ def dashboard() -> None:
             "Warning: Server is currently running. Consider stopping it first with `bf stop`."
         )
 
-    # Dashboard generation (stub)
+    # Issue 11 fix: more informative dashboard stub
     logger.info("Generating dashboard (stub) for user: %s", user_email)
     typer.echo("Generating dashboard...")
-    typer.echo(
-        "  (Dashboard generation is a placeholder – full implementation in Issue #5)"
-    )
+    typer.echo("")
+    typer.echo("  This feature will be completed in Issues #5 and #6:")
+    typer.echo("    - Issue #5: LLM integration for insights")
+    typer.echo("    - Issue #6: Email delivery")
+    typer.echo("")
+    typer.echo("  What it will do:")
+    typer.echo("    1. Analyze your browsing data with AI")
+    typer.echo("    2. Generate personalized insights")
+    typer.echo("    3. Send beautiful dashboard to your email")
 
     # Email sending (stub)
     logger.info("Sending dashboard email (stub) to: %s", user_email)
-    typer.echo(f"Sending dashboard to {user_email}...")
-    typer.echo("  (Email sending is a placeholder – full implementation in Issue #6)")
-
-    typer.echo(f"\nDashboard generated and sent to {user_email}")
+    typer.echo("")
+    typer.echo(f"Dashboard generated and sent to {user_email}")
     logger.info("Dashboard command completed successfully")
 
 
