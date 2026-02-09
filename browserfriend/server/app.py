@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 
 from browserfriend.config import get_config
-from browserfriend.database import get_engine, init_database
+from browserfriend.database import User, get_engine, get_session_factory, init_database
 
 
 # Configure logging
@@ -77,6 +77,13 @@ class StatusResponse(BaseModel):
 
     status: str
     database: str
+
+
+class SetupResponse(BaseModel):
+    """Model for setup endpoint response."""
+
+    success: bool
+    email: str
 
 
 @asynccontextmanager
@@ -181,3 +188,39 @@ async def status():
         db_status = f"error: {str(e)}"
 
     return StatusResponse(status="running", database=db_status)
+
+
+@app.post("/api/setup", response_model=SetupResponse)
+async def setup(setup_data: SetupData):
+    """Save user email during setup.
+
+    Validates email format and creates user record if it doesn't exist.
+    """
+    logger.debug(f"Setup endpoint called with email: {setup_data.email}")
+    try:
+        SessionLocal = get_session_factory()
+        session = SessionLocal()
+        try:
+            # Query User table
+            user = session.query(User).filter(User.email == setup_data.email).first()
+
+            # If user doesn't exist, create new User record
+            if not user:
+                user = User(email=setup_data.email)
+                session.add(user)
+                session.commit()
+                session.refresh(user)
+                logger.info(f"Created new user: {user.email}")
+            else:
+                logger.debug(f"User already exists: {user.email}")
+
+            return SetupResponse(success=True, email=user.email)
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Database error in setup endpoint: {e}")
+            raise
+        finally:
+            session.close()
+    except Exception as e:
+        logger.error(f"Error in setup endpoint: {e}")
+        raise
