@@ -25,6 +25,9 @@ class Config(BaseSettings):
     resend_api_key: Optional[str] = None
     user_email: Optional[str] = None
 
+    # Session settings
+    session_timeout_minutes: int = 30  # Minutes of inactivity before session is considered stale
+
     # Logging
     log_level: str = "INFO"
     log_file: Optional[str] = None

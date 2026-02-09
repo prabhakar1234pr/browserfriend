@@ -137,6 +137,7 @@ class PageVisit(Base):
 Index("idx_page_visits_session_id", PageVisit.session_id)
 Index("idx_page_visits_domain", PageVisit.domain)
 Index("idx_page_visits_start_time", PageVisit.start_time)
+Index("idx_page_visits_end_time", PageVisit.end_time)
 Index("idx_page_visits_user_email", PageVisit.user_email)
 Index("idx_browsing_sessions_user_email", BrowsingSession.user_email)
 Index("idx_browsing_sessions_start_time", BrowsingSession.start_time)
@@ -226,7 +227,7 @@ def get_current_session(user_email: str) -> Optional[BrowsingSession]:
 
 
 def get_or_create_active_session(
-    user_email: str, inactivity_timeout_minutes: int = 30
+    user_email: str, inactivity_timeout_minutes: Optional[int] = None
 ) -> BrowsingSession:
     """Get active session or create a new one, closing stale sessions first.
 
@@ -236,11 +237,16 @@ def get_or_create_active_session(
 
     Args:
         user_email: The user's email address
-        inactivity_timeout_minutes: Minutes of inactivity before session is considered stale
+        inactivity_timeout_minutes: Minutes of inactivity before session is considered stale.
+            Defaults to config.session_timeout_minutes (30).
 
     Returns:
         An active BrowsingSession
     """
+    if inactivity_timeout_minutes is None:
+        config = get_config()
+        inactivity_timeout_minutes = config.session_timeout_minutes
+
     SessionLocal = get_session_factory()
     session = SessionLocal()
     try:
