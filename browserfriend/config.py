@@ -1,4 +1,5 @@
 """Configuration management for BrowserFriend."""
+
 from pathlib import Path
 from typing import Optional
 
@@ -10,7 +11,7 @@ class Config(BaseSettings):
 
     # Server settings
     server_host: str = "127.0.0.1"
-    server_port: int = 8765
+    server_port: int = 8000
 
     # Database settings
     database_path: Optional[str] = None
@@ -23,6 +24,9 @@ class Config(BaseSettings):
     # Email settings
     resend_api_key: Optional[str] = None
     user_email: Optional[str] = None
+
+    # Session settings
+    session_timeout_minutes: int = 30  # Minutes of inactivity before session is considered stale
 
     # Logging
     log_level: str = "INFO"
