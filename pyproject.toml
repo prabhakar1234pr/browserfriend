@@ -10,6 +10,7 @@ dependencies = [
     "sqlalchemy",
     "typer",
     "pydantic",
+    "pydantic-settings",
     "google-generativeai",
     "python-dotenv",
     "resend",
