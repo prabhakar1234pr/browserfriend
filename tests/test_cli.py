@@ -1,8 +1,5 @@
 """Tests for BrowserFriend CLI commands."""
 
-import json
-from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,7 +8,6 @@ from typer.testing import CliRunner
 from browserfriend.cli import (
     EMAIL_REGEX,
     PID_FILE,
-    _delete_pid,
     _format_duration,
     _read_pid,
     _read_pid_data,
@@ -242,9 +238,14 @@ class TestStopCommand:
         mock_proc.wait.return_value = None
 
         with (
-            patch("browserfriend.cli._read_pid_data", return_value={
-                "pid": 1234, "session_id": "sess-123", "started_at": "2026-01-01T00:00:00+00:00"
-            }),
+            patch(
+                "browserfriend.cli._read_pid_data",
+                return_value={
+                    "pid": 1234,
+                    "session_id": "sess-123",
+                    "started_at": "2026-01-01T00:00:00+00:00",
+                },
+            ),
             patch("browserfriend.cli._is_server_running", return_value=True),
             patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
             patch("browserfriend.cli._delete_pid"),
@@ -267,18 +268,25 @@ class TestStopCommand:
         mock_ended_session.duration = 120.0
 
         with (
-            patch("browserfriend.cli._read_pid_data", return_value={
-                "pid": 1234, "session_id": "sess-from-pid", "started_at": "2026-01-01T00:00:00+00:00"
-            }),
+            patch(
+                "browserfriend.cli._read_pid_data",
+                return_value={
+                    "pid": 1234,
+                    "session_id": "sess-from-pid",
+                    "started_at": "2026-01-01T00:00:00+00:00",
+                },
+            ),
             patch("browserfriend.cli._is_server_running", return_value=True),
             patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
             patch("browserfriend.cli._delete_pid"),
             patch("browserfriend.cli.psutil.Process", return_value=mock_proc),
-            patch("browserfriend.database.end_session", return_value=mock_ended_session) as mock_end,
+            patch(
+                "browserfriend.database.end_session", return_value=mock_ended_session
+            ) as mock_end,
             patch("browserfriend.database.get_visits_by_session", return_value=[]),
             patch("browserfriend.database.get_top_domains_by_user", return_value=[]),
         ):
-            result = runner.invoke(app, ["stop"])
+            runner.invoke(app, ["stop"])
             # Verify end_session was called with the stored session_id
             mock_end.assert_called_once_with("sess-from-pid")
 
@@ -312,18 +320,67 @@ class TestDashboardCommand:
             assert "setup" in result.stdout.lower()
 
     def test_dashboard_success(self):
-        """Issue 11: dashboard shows informative stub with issue references."""
+        """Dashboard generates insights for a session with browsing data."""
+
+        from browserfriend.database import (
+            BrowsingSession,
+            PageVisit,
+            User,
+            drop_tables,
+            get_session_factory,
+            init_database,
+        )
+
+        # Setup fresh DB with a session + visits
+        drop_tables()
+        init_database()
+        SessionLocal = get_session_factory()
+        db = SessionLocal()
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            user = User(email="test@example.com")
+            db.add(user)
+            db.commit()
+
+            start = datetime(2026, 2, 9, 10, 0, 0, tzinfo=timezone.utc)
+            bs = BrowsingSession(
+                session_id="cli-dash-001",
+                user_email="test@example.com",
+                start_time=start,
+                end_time=start + timedelta(hours=1),
+                duration=3600,
+            )
+            db.add(bs)
+            db.commit()
+
+            pv = PageVisit(
+                session_id="cli-dash-001",
+                user_email="test@example.com",
+                url="https://github.com",
+                domain="github.com",
+                title="GitHub",
+                start_time=start,
+                end_time=start + timedelta(minutes=30),
+                duration_seconds=1800,
+            )
+            db.add(pv)
+            db.commit()
+        finally:
+            db.close()
+
         with (
             patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
             patch("browserfriend.cli._read_pid", return_value=None),
             patch("browserfriend.cli._is_server_running", return_value=False),
+            patch(
+                "browserfriend.llm.analyzer._get_gemini_model",
+                side_effect=Exception("no API key in test"),
+            ),
         ):
             result = runner.invoke(app, ["dashboard"])
             assert result.exit_code == 0
-            assert "test@example.com" in result.stdout
-            assert "Issue #5" in result.stdout
-            assert "Issue #6" in result.stdout
-            assert "AI" in result.stdout or "insights" in result.stdout.lower()
+            assert "cli-dash-001" in result.stdout or "Dashboard generated" in result.stdout
 
 
 class TestHelpText:

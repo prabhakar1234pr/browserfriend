@@ -56,9 +56,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, created_at={self.created_at})>"
@@ -71,16 +69,12 @@ class BrowsingSession(Base):
 
     session_id = Column(String, primary_key=True, default=lambda: str(uuid4()))
     user_email = Column(String, nullable=False, index=True)
-    start_time = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    start_time = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     end_time = Column(DateTime, nullable=True)
     duration = Column(Float, nullable=True)  # Duration in seconds
 
     # Relationship to page visits
-    page_visits = relationship(
-        "PageVisit", back_populates="session", cascade="all, delete-orphan"
-    )
+    page_visits = relationship("PageVisit", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<BrowsingSession(session_id={self.session_id}, user_email={self.user_email}, start_time={self.start_time})>"
@@ -113,9 +107,7 @@ class PageVisit(Base):
     url = Column(String, nullable=False)
     domain = Column(String, nullable=False, index=True)
     title = Column(String, nullable=True)
-    start_time = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    start_time = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     end_time = Column(DateTime, nullable=True)
     duration_seconds = Column(Float, nullable=True)
 
@@ -270,9 +262,7 @@ def get_or_create_active_session(
                 .first()
             )
 
-            cutoff = datetime.now(timezone.utc) - timedelta(
-                minutes=inactivity_timeout_minutes
-            )
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=inactivity_timeout_minutes)
 
             # Determine the latest activity timestamp
             last_activity = None
@@ -295,8 +285,7 @@ def get_or_create_active_session(
                 current = None  # Force creation of new session below
             else:
                 logger.debug(
-                    f"Session {current.session_id} is still active "
-                    f"(last activity: {last_activity})"
+                    f"Session {current.session_id} is still active (last activity: {last_activity})"
                 )
                 return current
 
@@ -311,8 +300,7 @@ def get_or_create_active_session(
         session.commit()
         session.refresh(new_session)
         logger.info(
-            f"Created new browsing session: {new_session.session_id} "
-            f"for user: {user_email}"
+            f"Created new browsing session: {new_session.session_id} for user: {user_email}"
         )
         return new_session
     finally:
@@ -346,9 +334,7 @@ def end_session(session_id: str) -> Optional[BrowsingSession]:
     session = SessionLocal()
     try:
         browsing_session = (
-            session.query(BrowsingSession)
-            .filter(BrowsingSession.session_id == session_id)
-            .first()
+            session.query(BrowsingSession).filter(BrowsingSession.session_id == session_id).first()
         )
         if browsing_session:
             browsing_session.end_time = datetime.now(timezone.utc)
@@ -405,9 +391,7 @@ def create_page_visit(
         db_session.close()
 
 
-def get_sessions_by_user(
-    user_email: str, limit: Optional[int] = None
-) -> List[BrowsingSession]:
+def get_sessions_by_user(user_email: str, limit: Optional[int] = None) -> List[BrowsingSession]:
     """Get all sessions for a user, ordered by start_time descending.
 
     Args:
@@ -547,9 +531,7 @@ def get_user_email_from_session(session_id: str) -> Optional[str]:
     session = SessionLocal()
     try:
         browsing_session = (
-            session.query(BrowsingSession)
-            .filter(BrowsingSession.session_id == session_id)
-            .first()
+            session.query(BrowsingSession).filter(BrowsingSession.session_id == session_id).first()
         )
         return browsing_session.user_email if browsing_session else None
     finally:

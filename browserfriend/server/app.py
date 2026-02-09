@@ -9,7 +9,6 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 
 from browserfriend.config import get_config
@@ -17,7 +16,6 @@ from browserfriend.database import (
     BrowsingSession,
     PageVisit,
     User,
-    end_session,
     extract_domain,
     get_engine,
     get_or_create_active_session,
@@ -35,9 +33,7 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None):
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Configure detailed logging format with more information
-    log_format = (
-        "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
-    )
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
     date_format = "%Y-%m-%d %H:%M:%S"
 
     # Configure handlers
@@ -277,9 +273,7 @@ async def setup(setup_data: SetupData):
             session.rollback()
             logger.error(f"Database error in setup endpoint: {e}", exc_info=True)
             logger.error("Rolled back transaction due to error")
-            raise HTTPException(
-                status_code=500, detail=f"Database error during setup: {str(e)}"
-            )
+            raise HTTPException(status_code=500, detail=f"Database error during setup: {str(e)}")
         finally:
             session.close()
             logger.debug("Database session closed")
@@ -419,9 +413,7 @@ async def track(tracking_data: TrackingData):
             session.rollback()
             logger.error(f"Database error in track endpoint: {e}", exc_info=True)
             logger.error("Rolled back transaction due to error")
-            raise HTTPException(
-                status_code=500, detail=f"Database error during tracking: {str(e)}"
-            )
+            raise HTTPException(status_code=500, detail=f"Database error during tracking: {str(e)}")
         finally:
             session.close()
             logger.debug("Database session closed")
@@ -488,7 +480,7 @@ async def end_session_endpoint(request: EndSessionRequest):
 
             response = EndSessionResponse(
                 success=True,
-                message=f"Session ended successfully",
+                message="Session ended successfully",
                 session_id=request.session_id,
                 duration_seconds=browsing_session.duration,
             )
@@ -500,9 +492,7 @@ async def end_session_endpoint(request: EndSessionRequest):
             session.rollback()
             logger.error(f"Database error in end session endpoint: {e}", exc_info=True)
             logger.error("Rolled back transaction due to error")
-            raise HTTPException(
-                status_code=500, detail=f"Database error ending session: {str(e)}"
-            )
+            raise HTTPException(status_code=500, detail=f"Database error ending session: {str(e)}")
         finally:
             session.close()
             logger.debug("Database session closed")

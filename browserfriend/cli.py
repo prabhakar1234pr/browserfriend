@@ -24,9 +24,7 @@ from browserfriend.config import get_config
 # Logging setup
 # ---------------------------------------------------------------------------
 
-LOG_FORMAT = (
-    "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
-)
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -375,18 +373,12 @@ def start() -> None:
     # session exists, causing get_or_create_active_session to spawn a
     # duplicate session.
     try:
-        from browserfriend.database import (
-            BrowsingSession,
-            create_new_session,
-            get_session_factory,
-        )
+        from browserfriend.database import create_new_session
 
         logger.info("Creating browsing session before server start")
         browsing_session = create_new_session(user_email)
         session_id = browsing_session.session_id
-        logger.info(
-            "Browsing session created: session_id=%s, user=%s", session_id, user_email
-        )
+        logger.info("Browsing session created: session_id=%s, user=%s", session_id, user_email)
     except Exception as exc:
         logger.error("Failed to create browsing session: %s", exc, exc_info=True)
         typer.echo(f"Error: Failed to create session: {exc}")
@@ -516,17 +508,11 @@ def stop() -> None:
             # Prefer stored session_id (Issue 8), fall back to DB query
             target_session_id = stored_session_id
             if target_session_id:
-                logger.info(
-                    "Using stored session_id from PID file: %s", target_session_id
-                )
+                logger.info("Using stored session_id from PID file: %s", target_session_id)
             else:
-                logger.info(
-                    "No session_id in PID file, querying DB for active session"
-                )
+                logger.info("No session_id in PID file, querying DB for active session")
                 current_session = get_current_session(user_email)
-                target_session_id = (
-                    current_session.session_id if current_session else None
-                )
+                target_session_id = current_session.session_id if current_session else None
 
             if target_session_id:
                 logger.info("Ending session: %s", target_session_id)
@@ -550,8 +536,7 @@ def stop() -> None:
                     )
                 else:
                     logger.warning(
-                        "end_session returned None for session %s "
-                        "(may already be ended)",
+                        "end_session returned None for session %s (may already be ended)",
                         target_session_id,
                     )
             else:
@@ -568,7 +553,11 @@ def stop() -> None:
         # Verify it's our server before killing (Issue 5)
         try:
             cmdline = " ".join(proc.cmdline()).lower()
-            if "browserfriend" not in cmdline and "main.py" not in cmdline and "uvicorn" not in cmdline:
+            if (
+                "browserfriend" not in cmdline
+                and "main.py" not in cmdline
+                and "uvicorn" not in cmdline
+            ):
                 logger.warning(
                     "Process %d is NOT BrowserFriend server (cmdline: %s). "
                     "Will not terminate. Cleaning up PID file.",
@@ -577,8 +566,7 @@ def stop() -> None:
                 )
                 _delete_pid()
                 typer.echo(
-                    f"Warning: Process {pid} is not BrowserFriend server. "
-                    "PID file cleaned up."
+                    f"Warning: Process {pid} is not BrowserFriend server. PID file cleaned up."
                 )
                 return
         except (psutil.AccessDenied, psutil.ZombieProcess):
@@ -749,7 +737,7 @@ def status() -> None:
 
 @app.command()
 def dashboard() -> None:
-    """Generate dashboard and send via email."""
+    """Generate AI-powered dashboard with browsing insights."""
     logger.info("=" * 60)
     logger.info("CLI command: dashboard")
     logger.info("=" * 60)
@@ -769,23 +757,65 @@ def dashboard() -> None:
             "Warning: Server is currently running. Consider stopping it first with `bf stop`."
         )
 
-    # Issue 11 fix: more informative dashboard stub
-    logger.info("Generating dashboard (stub) for user: %s", user_email)
-    typer.echo("Generating dashboard...")
-    typer.echo("")
-    typer.echo("  This feature will be completed in Issues #5 and #6:")
-    typer.echo("    - Issue #5: LLM integration for insights")
-    typer.echo("    - Issue #6: Email delivery")
-    typer.echo("")
-    typer.echo("  What it will do:")
-    typer.echo("    1. Analyze your browsing data with AI")
-    typer.echo("    2. Generate personalized insights")
-    typer.echo("    3. Send beautiful dashboard to your email")
+    # Get latest session for this user
+    try:
+        from browserfriend.database import BrowsingSession, get_session_factory
 
-    # Email sending (stub)
-    logger.info("Sending dashboard email (stub) to: %s", user_email)
+        SessionLocal = get_session_factory()
+        db_session = SessionLocal()
+        try:
+            session = (
+                db_session.query(BrowsingSession)
+                .filter(BrowsingSession.user_email == user_email)
+                .order_by(BrowsingSession.start_time.desc())
+                .first()
+            )
+            if not session:
+                logger.error("No browsing sessions found for user: %s", user_email)
+                typer.echo(
+                    "Error: No browsing sessions found. Start tracking first with `bf start`."
+                )
+                raise typer.Exit(code=1)
+
+            target_session_id = session.session_id
+            logger.info("Using session: %s", target_session_id)
+        finally:
+            db_session.close()
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        logger.error("Failed to query sessions: %s", exc, exc_info=True)
+        typer.echo(f"Error: Failed to query sessions: {exc}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Analyzing session {target_session_id}...")
+    typer.echo("Generating AI insights with Gemini...")
     typer.echo("")
-    typer.echo(f"Dashboard generated and sent to {user_email}")
+
+    # Generate insights
+    try:
+        from browserfriend.llm import InsufficientDataError, LLMError
+        from browserfriend.llm.analyzer import generate_insights
+        from browserfriend.llm.display import display_insights
+
+        insights = generate_insights(target_session_id)
+        display_insights(insights)
+
+    except InsufficientDataError as exc:
+        logger.error("Insufficient data: %s", exc)
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
+    except LLMError as exc:
+        logger.error("LLM error: %s", exc)
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        logger.error("Dashboard generation failed: %s", exc, exc_info=True)
+        typer.echo(f"Error: Failed to generate dashboard: {exc}")
+        raise typer.Exit(code=1)
+
+    typer.echo("")
+    typer.echo("Email delivery coming in Issue #6")
     logger.info("Dashboard command completed successfully")
 
 

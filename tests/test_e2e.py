@@ -56,6 +56,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] Status check failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -87,6 +88,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] Setup failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -123,9 +125,7 @@ def test_e2e_workflow():
         session = SessionLocal()
         try:
             sessions = (
-                session.query(BrowsingSession)
-                .filter(BrowsingSession.end_time.is_(None))
-                .all()
+                session.query(BrowsingSession).filter(BrowsingSession.end_time.is_(None)).all()
             )
             assert len(sessions) == 1
             assert sessions[0].session_id == first_session_id
@@ -142,6 +142,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] Track with email failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -169,6 +170,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] Track without email test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -196,6 +198,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] Track with wrong email test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -245,6 +248,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] Multiple visits test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -270,7 +274,11 @@ def test_e2e_workflow():
         # Verify session is ended in database
         session = SessionLocal()
         try:
-            bs = session.query(BrowsingSession).filter(BrowsingSession.session_id == first_session_id).first()
+            bs = (
+                session.query(BrowsingSession)
+                .filter(BrowsingSession.session_id == first_session_id)
+                .first()
+            )
             assert bs.end_time is not None
             assert bs.duration is not None
             print(f"[OK] Session end_time set: {bs.end_time}")
@@ -295,6 +303,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] End session test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -327,6 +336,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] New session test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -392,7 +402,9 @@ def test_e2e_workflow():
             assert len(all_sessions) == 2
             ended = [s for s in all_sessions if s.end_time is not None]
             active = [s for s in all_sessions if s.end_time is None]
-            print(f"[OK] Total sessions: {len(all_sessions)} ({len(ended)} ended, {len(active)} active)")
+            print(
+                f"[OK] Total sessions: {len(all_sessions)} ({len(ended)} ended, {len(active)} active)"
+            )
 
             # Page visits
             all_visits = session.query(PageVisit).all()
@@ -409,6 +421,7 @@ def test_e2e_workflow():
     except Exception as e:
         print(f"[ERROR] Data integrity check failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

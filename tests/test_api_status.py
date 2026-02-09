@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi.testclient import TestClient
 
-from browserfriend.server.app import app, StatusResponse, TrackingData, SetupData, SuccessResponse
+from browserfriend.server.app import SetupData, StatusResponse, SuccessResponse, TrackingData, app
 
 
 def test_pydantic_models():
@@ -43,8 +43,8 @@ def test_pydantic_models():
     # Test SetupData with invalid email
     print("\n3. Testing SetupData model with invalid email...")
     try:
-        setup_invalid = SetupData(email="invalid-email")
-        print(f"[ERROR] Should have rejected invalid email")
+        SetupData(email="invalid-email")
+        print("[ERROR] Should have rejected invalid email")
         return False
     except Exception as e:
         print(f"[OK] Correctly rejected invalid email: {type(e).__name__}")

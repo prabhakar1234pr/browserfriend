@@ -105,9 +105,7 @@ def test_database():
     try:
         db_session = SessionLocal()
         sessions = (
-            db_session.query(BrowsingSession)
-            .filter(BrowsingSession.user_email == test_email)
-            .all()
+            db_session.query(BrowsingSession).filter(BrowsingSession.user_email == test_email).all()
         )
         print(f"[OK] Found {len(sessions)} session(s) for {test_email}")
         for s in sessions:
@@ -123,13 +121,9 @@ def test_database():
     try:
         db_session = SessionLocal()
         visits = (
-            db_session.query(PageVisit)
-            .filter(PageVisit.session_id == session.session_id)
-            .all()
+            db_session.query(PageVisit).filter(PageVisit.session_id == session.session_id).all()
         )
-        print(
-            f"[OK] Found {len(visits)} page visit(s) for session {session.session_id}"
-        )
+        print(f"[OK] Found {len(visits)} page visit(s) for session {session.session_id}")
         for v in visits:
             print(f"  - {v.domain}: {v.url} ({v.duration_seconds}s if ended)")
     except Exception as e:

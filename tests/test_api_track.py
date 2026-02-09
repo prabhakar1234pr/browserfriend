@@ -79,7 +79,9 @@ def test_track_endpoint():
         # Verify page visit was created in database
         session = SessionLocal()
         try:
-            page_visits = session.query(PageVisit).filter(PageVisit.url == "https://www.example.com").all()
+            page_visits = (
+                session.query(PageVisit).filter(PageVisit.url == "https://www.example.com").all()
+            )
             if len(page_visits) != 1:
                 print(f"[ERROR] Expected 1 page visit, found {len(page_visits)}")
                 return False
@@ -142,9 +144,7 @@ def test_track_endpoint():
         session = SessionLocal()
         try:
             active_sessions = (
-                session.query(BrowsingSession)
-                .filter(BrowsingSession.end_time.is_(None))
-                .all()
+                session.query(BrowsingSession).filter(BrowsingSession.end_time.is_(None)).all()
             )
             if len(active_sessions) != 1:
                 print(f"[ERROR] Expected 1 active session, found {len(active_sessions)}")
@@ -174,23 +174,21 @@ def test_track_endpoint():
                 "/api/track",
                 json={
                     "url": url,
-                    "title": f"Page {i+1}",
+                    "title": f"Page {i + 1}",
                     "duration": 45,
                     "timestamp": visit_timestamp,
                 },
             )
 
             if response.status_code != 200:
-                print(f"[ERROR] Visit {i+1} failed with status {response.status_code}")
+                print(f"[ERROR] Visit {i + 1} failed with status {response.status_code}")
                 return False
 
         # Verify all visits are in the same session
         session = SessionLocal()
         try:
             active_sessions = (
-                session.query(BrowsingSession)
-                .filter(BrowsingSession.end_time.is_(None))
-                .all()
+                session.query(BrowsingSession).filter(BrowsingSession.end_time.is_(None)).all()
             )
             if len(active_sessions) != 1:
                 print(f"[ERROR] Expected 1 active session, found {len(active_sessions)}")
@@ -198,7 +196,9 @@ def test_track_endpoint():
 
             session_id = active_sessions[0].session_id
             visits = session.query(PageVisit).filter(PageVisit.session_id == session_id).all()
-            if len(visits) < 3:  # At least 3 visits (example.com, github.com, google.com, stackoverflow.com)
+            if (
+                len(visits) < 3
+            ):  # At least 3 visits (example.com, github.com, google.com, stackoverflow.com)
                 print(f"[ERROR] Expected at least 3 visits in session, found {len(visits)}")
                 return False
 
@@ -301,11 +301,7 @@ def test_track_endpoint():
         # Verify start_time calculation
         session = SessionLocal()
         try:
-            visit = (
-                session.query(PageVisit)
-                .filter(PageVisit.url == "https://www.test.com")
-                .first()
-            )
+            visit = session.query(PageVisit).filter(PageVisit.url == "https://www.test.com").first()
             if not visit:
                 print("[ERROR] Page visit not found")
                 return False
@@ -327,14 +323,13 @@ def test_track_endpoint():
                 return False
 
             if abs((visit_end - end_time).total_seconds()) > 1:
-                print(
-                    f"[ERROR] End time incorrect. "
-                    f"Expected: {end_time}, Got: {visit_end}"
-                )
+                print(f"[ERROR] End time incorrect. Expected: {end_time}, Got: {visit_end}")
                 return False
 
             print("[OK] Start time and end time calculated correctly")
-            print(f"[OK] Start: {visit.start_time}, End: {visit.end_time}, Duration: {visit.duration_seconds}s")
+            print(
+                f"[OK] Start: {visit.start_time}, End: {visit.end_time}, Duration: {visit.duration_seconds}s"
+            )
         finally:
             session.close()
 

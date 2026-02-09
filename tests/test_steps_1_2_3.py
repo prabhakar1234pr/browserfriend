@@ -37,6 +37,7 @@ def test_step1_server_package_structure():
     # Check if it exports app
     try:
         from browserfriend.server import app as imported_app
+
         if imported_app is None:
             print("[ERROR] app is not exported from browserfriend.server")
             return False
@@ -66,6 +67,7 @@ def test_step2_fastapi_app_moved():
     print("\n1. Checking if app can be imported from server.app...")
     try:
         from browserfriend.server.app import app
+
         print("[OK] app imported successfully from browserfriend.server.app")
     except Exception as e:
         print(f"[ERROR] Failed to import app: {e}")
@@ -140,7 +142,9 @@ def test_step3_cors_middleware():
         cors_headers = {
             "access-control-allow-origin": response.headers.get("access-control-allow-origin"),
             "access-control-allow-methods": response.headers.get("access-control-allow-methods"),
-            "access-control-allow-credentials": response.headers.get("access-control-allow-credentials"),
+            "access-control-allow-credentials": response.headers.get(
+                "access-control-allow-credentials"
+            ),
         }
 
         print(f"[OK] CORS headers: {cors_headers}")
@@ -151,7 +155,9 @@ def test_step3_cors_middleware():
             headers={"Origin": "chrome-extension://abcdefghijklmnop"},
         )
         if response.status_code != 200:
-            print(f"[ERROR] GET request with chrome-extension origin failed: {response.status_code}")
+            print(
+                f"[ERROR] GET request with chrome-extension origin failed: {response.status_code}"
+            )
             return False
         print("[OK] GET request with chrome-extension origin succeeded")
 
