@@ -2,18 +2,22 @@
 
 from unittest.mock import MagicMock, patch
 
+import psutil
 import pytest
 from typer.testing import CliRunner
 
 from browserfriend.cli import (
     EMAIL_REGEX,
+    MONITOR_PID_FILE,
     PID_FILE,
     _format_duration,
+    _format_duration_human,
     _read_pid,
     _read_pid_data,
     _write_pid,
     _write_pid_data,
     app,
+    parse_duration,
 )
 
 runner = CliRunner()
@@ -26,12 +30,16 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def _clean_pid_file():
-    """Remove PID file before and after each test."""
+    """Remove PID file and monitor PID file before and after each test."""
     if PID_FILE.exists():
         PID_FILE.unlink()
+    if MONITOR_PID_FILE.exists():
+        MONITOR_PID_FILE.unlink()
     yield
     if PID_FILE.exists():
         PID_FILE.unlink()
+    if MONITOR_PID_FILE.exists():
+        MONITOR_PID_FILE.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +409,7 @@ class TestHelpText:
     def test_start_help(self):
         result = runner.invoke(app, ["start", "--help"])
         assert result.exit_code == 0
+        assert "--duration" in result.stdout or "-d" in result.stdout
 
     def test_stop_help(self):
         result = runner.invoke(app, ["stop", "--help"])
@@ -413,3 +422,316 @@ class TestHelpText:
     def test_dashboard_help(self):
         result = runner.invoke(app, ["dashboard", "--help"])
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue 12: Duration flag tests
+# ---------------------------------------------------------------------------
+
+
+class TestParseDuration:
+    """Test parse_duration() helper for --duration flag."""
+
+    def test_minutes(self):
+        assert parse_duration("5m") == 300
+        assert parse_duration("30m") == 1800
+        assert parse_duration("1m") == 60
+
+    def test_hours(self):
+        assert parse_duration("2h") == 7200
+        assert parse_duration("8h") == 28800
+        assert parse_duration("1h") == 3600
+
+    def test_days(self):
+        assert parse_duration("1d") == 86400
+        assert parse_duration("7d") == 604800
+
+    def test_case_insensitive(self):
+        assert parse_duration("5M") == 300
+        assert parse_duration("2H") == 7200
+        assert parse_duration("1D") == 86400
+
+    def test_whitespace_stripped(self):
+        assert parse_duration("  5m  ") == 300
+
+    def test_invalid_format_letters(self):
+        with pytest.raises(ValueError, match="Invalid duration format"):
+            parse_duration("5x")
+
+    def test_invalid_format_word(self):
+        with pytest.raises(ValueError, match="Invalid duration format"):
+            parse_duration("2hours")
+
+    def test_invalid_format_negative(self):
+        with pytest.raises(ValueError, match="Invalid duration format"):
+            parse_duration("-5m")
+
+    def test_invalid_format_empty(self):
+        with pytest.raises(ValueError, match="Invalid duration format"):
+            parse_duration("")
+
+    def test_invalid_format_no_unit(self):
+        with pytest.raises(ValueError, match="Invalid duration format"):
+            parse_duration("100")
+
+    def test_invalid_format_no_value(self):
+        with pytest.raises(ValueError, match="Invalid duration format"):
+            parse_duration("m")
+
+
+class TestFormatDurationHuman:
+    """Test _format_duration_human() helper."""
+
+    def test_seconds(self):
+        assert _format_duration_human(45) == "45 seconds"
+
+    def test_one_second(self):
+        assert _format_duration_human(1) == "1 second"
+
+    def test_minutes_only(self):
+        assert _format_duration_human(300) == "5 minutes"
+
+    def test_one_minute(self):
+        assert _format_duration_human(60) == "1 minute"
+
+    def test_minutes_and_seconds(self):
+        assert _format_duration_human(90) == "1 minute 30 seconds"
+
+    def test_hours_only(self):
+        assert _format_duration_human(7200) == "2 hours"
+
+    def test_one_hour(self):
+        assert _format_duration_human(3600) == "1 hour"
+
+    def test_hours_and_minutes(self):
+        assert _format_duration_human(5400) == "1 hour 30 minutes"
+
+    def test_days(self):
+        assert _format_duration_human(86400) == "1 day"
+        assert _format_duration_human(172800) == "2 days"
+
+
+class TestPidDataDurationFields:
+    """Issue 12: PID file stores duration_seconds and auto_stop_at."""
+
+    def test_write_with_duration(self):
+        _write_pid_data(
+            42, "sess-abc", duration_seconds=300, auto_stop_at="2026-02-09T18:00:00+00:00"
+        )
+        data = _read_pid_data()
+        assert data is not None
+        assert data["pid"] == 42
+        assert data["session_id"] == "sess-abc"
+        assert data["duration_seconds"] == 300
+        assert data["auto_stop_at"] == "2026-02-09T18:00:00+00:00"
+
+    def test_write_without_duration(self):
+        _write_pid_data(42, "sess-abc")
+        data = _read_pid_data()
+        assert data is not None
+        assert data["duration_seconds"] is None
+        assert data["auto_stop_at"] is None
+
+    def test_backward_compat_no_duration(self):
+        """Existing PID files without duration fields still work."""
+        _write_pid(555)
+        data = _read_pid_data()
+        assert data is not None
+        assert data["pid"] == 555
+        # Legacy format won't have duration fields
+        assert data.get("duration_seconds") is None
+
+
+class TestStartWithDuration:
+    """Issue 12: bf start --duration flag integration."""
+
+    def test_start_invalid_duration(self):
+        """Invalid duration format should fail with clear error."""
+        with patch("browserfriend.cli._get_user_email", return_value="test@example.com"):
+            result = runner.invoke(app, ["start", "--duration", "5x"])
+            assert result.exit_code == 1
+            assert "invalid" in result.stdout.lower() or "error" in result.stdout.lower()
+
+    def test_start_invalid_duration_word(self):
+        """Word format like '2hours' should fail."""
+        with patch("browserfriend.cli._get_user_email", return_value="test@example.com"):
+            result = runner.invoke(app, ["start", "--duration", "2hours"])
+            assert result.exit_code == 1
+            assert "invalid" in result.stdout.lower() or "error" in result.stdout.lower()
+
+    def test_start_shows_autostop_message(self):
+        """When duration is valid, auto-stop info should be displayed."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 9999
+
+        mock_session = MagicMock()
+        mock_session.session_id = "dur-sess-001"
+
+        with (
+            patch("browserfriend.cli._read_pid", return_value=None),
+            patch("browserfriend.cli._is_server_running", return_value=True),
+            patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
+            patch("browserfriend.database.init_database"),
+            patch("browserfriend.database.create_new_session", return_value=mock_session),
+            patch("browserfriend.cli.subprocess.Popen", return_value=mock_proc),
+            patch("browserfriend.cli.time.sleep"),
+            patch("browserfriend.cli._start_duration_monitor"),
+        ):
+            result = runner.invoke(app, ["start", "--duration", "5m"])
+            assert result.exit_code == 0
+            assert "auto-stop" in result.stdout.lower() or "5 minutes" in result.stdout.lower()
+
+    def test_start_without_duration_no_autostop(self):
+        """Without --duration, should say runs until stopped."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 9999
+
+        mock_session = MagicMock()
+        mock_session.session_id = "no-dur-sess"
+
+        with (
+            patch("browserfriend.cli._read_pid", return_value=None),
+            patch("browserfriend.cli._is_server_running", return_value=True),
+            patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
+            patch("browserfriend.database.init_database"),
+            patch("browserfriend.database.create_new_session", return_value=mock_session),
+            patch("browserfriend.cli.subprocess.Popen", return_value=mock_proc),
+            patch("browserfriend.cli.time.sleep"),
+        ):
+            result = runner.invoke(app, ["start"])
+            assert result.exit_code == 0
+            assert "runs until you stop it" in result.stdout.lower()
+
+
+class TestStopCancelsMonitor:
+    """Issue 12: bf stop should cancel the duration monitor."""
+
+    def test_stop_cancels_monitor(self):
+        """If monitor PID file exists, stop should terminate it."""
+        mock_proc = MagicMock()
+        mock_proc.is_running.return_value = True
+        mock_proc.status.return_value = "running"
+        mock_proc.cmdline.return_value = ["python", "main.py", "browserfriend"]
+        mock_proc.wait.return_value = None
+
+        mock_monitor = MagicMock()
+        mock_monitor.terminate.return_value = None
+
+        # Write a monitor PID file
+        MONITOR_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        MONITOR_PID_FILE.write_text("5555")
+
+        def mock_psutil_process(pid):
+            if pid == 1234:
+                return mock_proc
+            if pid == 5555:
+                return mock_monitor
+            raise psutil.NoSuchProcess(pid)
+
+        with (
+            patch(
+                "browserfriend.cli._read_pid_data",
+                return_value={
+                    "pid": 1234,
+                    "session_id": "sess-dur-cancel",
+                    "started_at": "2026-02-09T10:00:00+00:00",
+                    "duration_seconds": 3600,
+                    "auto_stop_at": "2026-02-09T11:00:00+00:00",
+                },
+            ),
+            patch("browserfriend.cli._is_server_running", return_value=True),
+            patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
+            patch("browserfriend.cli._delete_pid"),
+            patch("browserfriend.cli.psutil.Process", side_effect=mock_psutil_process),
+            patch("browserfriend.database.end_session", return_value=None),
+        ):
+            result = runner.invoke(app, ["stop"])
+            assert (
+                "cancelled auto-stop" in result.stdout.lower() or "stopped" in result.stdout.lower()
+            )
+            mock_monitor.terminate.assert_called_once()
+
+        # Clean up
+        MONITOR_PID_FILE.unlink(missing_ok=True)
+
+    def test_stop_no_monitor_file(self):
+        """Stop works normally when no monitor is running."""
+        mock_proc = MagicMock()
+        mock_proc.is_running.return_value = True
+        mock_proc.status.return_value = "running"
+        mock_proc.cmdline.return_value = ["python", "main.py"]
+        mock_proc.wait.return_value = None
+
+        MONITOR_PID_FILE.unlink(missing_ok=True)
+
+        with (
+            patch(
+                "browserfriend.cli._read_pid_data",
+                return_value={
+                    "pid": 1234,
+                    "session_id": "sess-no-mon",
+                    "started_at": "2026-02-09T10:00:00+00:00",
+                },
+            ),
+            patch("browserfriend.cli._is_server_running", return_value=True),
+            patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
+            patch("browserfriend.cli._delete_pid"),
+            patch("browserfriend.cli.psutil.Process", return_value=mock_proc),
+            patch("browserfriend.database.end_session", return_value=None),
+        ):
+            result = runner.invoke(app, ["stop"])
+            assert "stopped" in result.stdout.lower()
+
+
+class TestStatusAutoStop:
+    """Issue 12: bf status shows auto-stop info."""
+
+    def test_status_shows_autostop_time(self):
+        """Status should display remaining time when auto-stop is scheduled."""
+        from datetime import datetime, timedelta, timezone
+
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+
+        with (
+            patch("browserfriend.cli._read_pid", return_value=1234),
+            patch("browserfriend.cli._is_server_running", return_value=True),
+            patch(
+                "browserfriend.cli._read_pid_data",
+                return_value={
+                    "pid": 1234,
+                    "session_id": "sess-status",
+                    "started_at": "2026-02-09T10:00:00+00:00",
+                    "duration_seconds": 3600,
+                    "auto_stop_at": future,
+                },
+            ),
+            patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
+            patch("browserfriend.database.get_current_session", return_value=None),
+            patch("browserfriend.database.get_visits_by_user", return_value=[]),
+        ):
+            result = runner.invoke(app, ["status"])
+            assert result.exit_code == 0
+            assert "auto-stop" in result.stdout.lower()
+
+    def test_status_no_autostop_when_not_set(self):
+        """Status should not show auto-stop info when no duration was set."""
+        with (
+            patch("browserfriend.cli._read_pid", return_value=1234),
+            patch("browserfriend.cli._is_server_running", return_value=True),
+            patch(
+                "browserfriend.cli._read_pid_data",
+                return_value={
+                    "pid": 1234,
+                    "session_id": "sess-no-dur",
+                    "started_at": "2026-02-09T10:00:00+00:00",
+                    "duration_seconds": None,
+                    "auto_stop_at": None,
+                },
+            ),
+            patch("browserfriend.cli._get_user_email", return_value="test@example.com"),
+            patch("browserfriend.database.get_current_session", return_value=None),
+            patch("browserfriend.database.get_visits_by_user", return_value=[]),
+        ):
+            result = runner.invoke(app, ["status"])
+            assert result.exit_code == 0
+            assert "auto-stop" not in result.stdout.lower()
