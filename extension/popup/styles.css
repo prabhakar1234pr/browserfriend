@@ -1,0 +1,221 @@
+/* ─── BrowserFriend Popup Styles ─────────────────────────────────────── */
+
+/* Reset & base */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1a1a2e;
+  background: #ffffff;
+}
+
+/* ─── Header ──────────────────────────────────────────────────────── */
+.header {
+  background: linear-gradient(135deg, #4361ee, #3a0ca3);
+  color: #ffffff;
+  padding: 16px 20px 12px;
+  text-align: center;
+}
+
+.header__title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.header__subtitle {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+/* ─── Status section ──────────────────────────────────────────────── */
+.status-section {
+  padding: 12px 20px;
+  border-bottom: 1px solid #e8e8ef;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.status-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+}
+
+.status-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.status-badge--checking {
+  background: #f0f0f5;
+  color: #888;
+}
+
+.status-badge--active {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-badge--offline {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.status-badge--error {
+  background: #fff3cd;
+  color: #856404;
+}
+
+/* ─── Email sections ──────────────────────────────────────────────── */
+.email-section,
+.email-configured {
+  padding: 14px 20px;
+  border-bottom: 1px solid #e8e8ef;
+}
+
+.email-section__prompt {
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 10px;
+}
+
+.input-group {
+  display: flex;
+  gap: 8px;
+}
+
+.input-group__field {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-group__field:focus {
+  border-color: #4361ee;
+  box-shadow: 0 0 0 2px rgba(67, 97, 238, 0.15);
+}
+
+.email-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.email-display__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+}
+
+.email-display__value {
+  font-size: 13px;
+  color: #1a1a2e;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+/* ─── Messages ────────────────────────────────────────────────────── */
+.message {
+  font-size: 12px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.message--error {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.message--success {
+  background: #d4edda;
+  color: #155724;
+}
+
+/* ─── Buttons ─────────────────────────────────────────────────────── */
+.btn {
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.btn:hover {
+  opacity: 0.9;
+}
+
+.btn:active {
+  opacity: 0.8;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: #4361ee;
+  color: #fff;
+}
+
+.btn--secondary {
+  background: #e8e8ef;
+  color: #333;
+}
+
+.btn--outline {
+  background: transparent;
+  border: 1.5px solid #4361ee;
+  color: #4361ee;
+  width: 100%;
+}
+
+.btn--outline:hover {
+  background: rgba(67, 97, 238, 0.06);
+}
+
+.btn--small {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* ─── Actions section ─────────────────────────────────────────────── */
+.actions {
+  padding: 14px 20px;
+}
+
+/* ─── Footer ──────────────────────────────────────────────────────── */
+.footer {
+  text-align: center;
+  padding: 8px 20px 12px;
+  font-size: 11px;
+  color: #aaa;
+}
