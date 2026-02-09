@@ -1,8 +1,8 @@
 """Main entry point for BrowserFriend FastAPI server."""
+
 import uvicorn
 
 from browserfriend.config import get_config
-from browserfriend.server import app
 
 config = get_config()
 

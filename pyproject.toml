@@ -22,4 +22,7 @@ dev = [
     "pylint",
     "pytest",
     "black",
+    "pre-commit",
+    "ruff",
+    "isort",
 ]
