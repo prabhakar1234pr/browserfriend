@@ -233,8 +233,8 @@ def analyze_browsing_data(session_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _get_gemini_model():
-    """Initialise and return the Gemini generative model.
+def _get_gemini_client():
+    """Initialise and return the Google GenAI client.
 
     Raises:
         browserfriend.llm.APIKeyError: If the API key is missing.
@@ -250,12 +250,11 @@ def _get_gemini_model():
             "Get a key at https://makersuite.google.com/app/apikey"
         )
 
-    import google.generativeai as genai
+    from google import genai
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    logger.debug("Gemini model initialised (gemini-1.5-flash)")
-    return model
+    client = genai.Client(api_key=api_key)
+    logger.debug("Google GenAI client initialised")
+    return client
 
 
 def _call_gemini_with_retry(prompt: str, max_retries: int = 3, timeout: int = 30) -> str:
@@ -275,15 +274,15 @@ def _call_gemini_with_retry(prompt: str, max_retries: int = 3, timeout: int = 30
     """
     from browserfriend.llm import LLMError, RateLimitError
 
-    model = _get_gemini_model()
+    client = _get_gemini_client()
     last_error: Optional[Exception] = None
 
     for attempt in range(1, max_retries + 1):
         try:
             logger.info("Gemini API call attempt %d/%d", attempt, max_retries)
-            response = model.generate_content(
-                prompt,
-                generation_config={"temperature": 0.7, "max_output_tokens": 2048},
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
             )
             text = response.text.strip()
             logger.info("Gemini API response received (%d chars)", len(text))

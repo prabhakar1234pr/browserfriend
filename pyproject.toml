@@ -11,7 +11,7 @@ dependencies = [
     "typer",
     "pydantic",
     "pydantic-settings",
-    "google-generativeai",
+    "google-genai",
     "python-dotenv",
     "resend",
     "jinja2",

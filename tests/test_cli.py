@@ -374,7 +374,7 @@ class TestDashboardCommand:
             patch("browserfriend.cli._read_pid", return_value=None),
             patch("browserfriend.cli._is_server_running", return_value=False),
             patch(
-                "browserfriend.llm.analyzer._get_gemini_model",
+                "browserfriend.llm.analyzer._get_gemini_client",
                 side_effect=Exception("no API key in test"),
             ),
         ):

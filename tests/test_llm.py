@@ -335,12 +335,12 @@ class TestGenerateInsights:
             },
         }
 
-        mock_model = MagicMock()
+        mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.text = json.dumps(fake_response)
-        mock_model.generate_content.return_value = mock_response
+        mock_client.models.generate_content.return_value = mock_response
 
-        with patch("browserfriend.llm.analyzer._get_gemini_model", return_value=mock_model):
+        with patch("browserfriend.llm.analyzer._get_gemini_client", return_value=mock_client):
             insights = generate_insights(sample_session)
 
         assert insights["session_id"] == sample_session
@@ -353,7 +353,7 @@ class TestGenerateInsights:
     def test_falls_back_on_llm_failure(self, sample_session):
         """When the LLM fails the system should use fallback insights."""
         with patch(
-            "browserfriend.llm.analyzer._get_gemini_model",
+            "browserfriend.llm.analyzer._get_gemini_client",
             side_effect=Exception("API down"),
         ):
             insights = generate_insights(sample_session)
