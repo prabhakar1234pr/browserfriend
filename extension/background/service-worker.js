@@ -288,8 +288,11 @@ async function finalizePreviousTab(reason) {
   // Get email
   const email = await getStoredEmail();
   if (!email) {
-    log.warn("finalizePreviousTab: no email configured — skipping server send");
-    await saveCurrentTabState(null);
+    log.warn(
+      "finalizePreviousTab: no email configured — keeping tab state, skipping server send. " +
+      "Set email via the popup or run `bf setup` to fix."
+    );
+    // DO NOT clear currentTab — keep tracking so timing is preserved
     return;
   }
 
@@ -436,23 +439,80 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
   }
 });
 
+// ─── Email auto-sync from server ─────────────────────────────────────
+
+/**
+ * When the server is online but no email is stored in the extension,
+ * fetch the user email from the /api/status response and save it.
+ * This bridges the gap between `bf setup` (CLI) and the extension.
+ *
+ * @param {object} statusData  parsed JSON from /api/status
+ */
+async function syncEmailFromServer(statusData) {
+  const storedEmail = await getStoredEmail();
+  if (storedEmail) {
+    return; // already have an email
+  }
+
+  const serverEmail = statusData && statusData.user_email;
+  if (!serverEmail) {
+    log.debug("syncEmailFromServer: server has no user_email — skipping");
+    return;
+  }
+
+  log.info(`syncEmailFromServer: auto-syncing email from server — "${serverEmail}"`);
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ email: serverEmail }, () => {
+      if (chrome.runtime.lastError) {
+        log.error("syncEmailFromServer: failed to save —", chrome.runtime.lastError.message);
+      } else {
+        log.info(`syncEmailFromServer: email "${serverEmail}" saved to extension storage`);
+      }
+      resolve();
+    });
+  });
+}
+
 // ─── Server status polling ───────────────────────────────────────────
+
+/** Alarm name used for persistent server polling. */
+const POLL_ALARM_NAME = "browserfriend-poll";
 
 /**
  * Poll server status. When server transitions from offline to online,
- * start tracking the current active tab (so already-open tabs are captured).
+ * start tracking the current active tab (so already-open tabs are captured)
+ * and auto-sync the user email from the server.
  * When server goes offline, finalize the current tab.
  */
 async function pollServerStatus() {
-  const serverIsOnline = await checkServerOnline();
+  let serverIsOnline = false;
+  let statusData = null;
+
+  try {
+    const response = await fetch(API_STATUS, { signal: AbortSignal.timeout(3000) });
+    if (response.ok) {
+      statusData = await response.json();
+      serverIsOnline = true;
+    }
+  } catch {
+    // server offline
+  }
+
   const serverWasOnline = await getServerWasOnline();
 
   if (serverWasOnline === false && serverIsOnline === true) {
     log.info("pollServerStatus: server came online — capturing current tab");
+
+    // Auto-sync email from server (bridges bf setup → extension)
+    await syncEmailFromServer(statusData);
+
     const tab = await getActiveTab();
     if (tab) {
       await startTrackingTab(tab);
     }
+  } else if (serverIsOnline && statusData) {
+    // Server already online — still try to sync email in case it was missing
+    await syncEmailFromServer(statusData);
   } else if (serverWasOnline === true && serverIsOnline === false) {
     log.info("pollServerStatus: server went offline — finalizing current tab");
     await finalizePreviousTab("server-offline");
@@ -465,10 +525,14 @@ async function pollServerStatus() {
 
 /**
  * Runs once when the service worker first installs (extension loaded/reloaded).
- * Start tracking whatever tab is currently active.
+ * Start tracking whatever tab is currently active and set up the alarm.
  */
 chrome.runtime.onInstalled.addListener(async (details) => {
   log.info(`[LIFECYCLE] onInstalled — reason="${details.reason}"`);
+
+  // Create persistent alarm for server polling (survives service worker restarts)
+  chrome.alarms.create(POLL_ALARM_NAME, { periodInMinutes: 0.1 }); // ~6 seconds
+  log.info("Server poll alarm created");
 
   const tab = await getActiveTab();
   if (tab) {
@@ -485,14 +549,34 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 chrome.runtime.onStartup.addListener(async () => {
   log.info("[LIFECYCLE] onStartup — service worker waking up");
 
+  // Ensure alarm exists (in case it was lost)
+  chrome.alarms.create(POLL_ALARM_NAME, { periodInMinutes: 0.1 });
+
   const tab = await getActiveTab();
   if (tab) {
     await startTrackingTab(tab);
   }
 });
 
-// Start server status polling: run once immediately, then every SERVER_POLL_INTERVAL_MS
+/**
+ * Alarm listener — persistent replacement for setInterval.
+ * Chrome.alarms survive service worker restarts.
+ */
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === POLL_ALARM_NAME) {
+    await pollServerStatus();
+  }
+});
+
+// Run once immediately when the service worker script loads
 pollServerStatus();
-setInterval(pollServerStatus, SERVER_POLL_INTERVAL_MS);
+
+// Ensure alarm exists on every service worker wake-up (belt-and-suspenders)
+chrome.alarms.get(POLL_ALARM_NAME, (existing) => {
+  if (!existing) {
+    chrome.alarms.create(POLL_ALARM_NAME, { periodInMinutes: 0.1 });
+    log.info("Poll alarm re-created on service worker load");
+  }
+});
 
 log.info("Service worker loaded — BrowserFriend tab tracking active");
