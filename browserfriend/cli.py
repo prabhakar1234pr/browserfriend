@@ -217,7 +217,7 @@ def _get_user_email() -> Optional[str]:
         SessionLocal = get_session_factory()
         session = SessionLocal()
         try:
-            user = session.query(User).first()
+            user = session.query(User).order_by(User.id.desc()).first()
             if user:
                 logger.debug("Found user email: %s", user.email)
                 return user.email
