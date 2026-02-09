@@ -172,7 +172,9 @@ def test_setup_endpoint():
             )
 
             if response.status_code != 200:
-                print(f"[ERROR] Valid email {test_email} rejected with status {response.status_code}")
+                print(
+                    f"[ERROR] Valid email {test_email} rejected with status {response.status_code}"
+                )
                 return False
 
             data = response.json()
