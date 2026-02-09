@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BrowserFriend</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <h1 class="header__title">BrowserFriend</h1>
+    <p class="header__subtitle">Tab Activity Tracker</p>
+  </header>
+
+  <!-- Status section -->
+  <section class="status-section" id="statusSection">
+    <div class="status-row">
+      <span class="status-label">Server</span>
+      <span class="status-badge" id="serverStatus">Checking...</span>
+    </div>
+  </section>
+
+  <!-- Email section: Not configured -->
+  <section class="email-section" id="emailSetupSection" style="display: none;">
+    <p class="email-section__prompt">Enter your email to start tracking:</p>
+    <div class="input-group">
+      <input
+        type="email"
+        id="emailInput"
+        class="input-group__field"
+        placeholder="you@example.com"
+        autocomplete="email"
+      />
+      <button id="saveEmailBtn" class="btn btn--primary">Save</button>
+    </div>
+    <p class="message" id="emailError" style="display: none;"></p>
+  </section>
+
+  <!-- Email section: Already configured -->
+  <section class="email-configured" id="emailConfiguredSection" style="display: none;">
+    <div class="email-display">
+      <span class="email-display__label">Email</span>
+      <span class="email-display__value" id="currentEmail"></span>
+    </div>
+    <button id="changeEmailBtn" class="btn btn--secondary btn--small">Change Email</button>
+  </section>
+
+  <!-- Actions -->
+  <section class="actions">
+    <button id="openDashboardBtn" class="btn btn--outline">Open Dashboard</button>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <span>v1.0.0</span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

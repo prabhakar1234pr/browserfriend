@@ -1,1 +1,36 @@
-{}
+{
+  "manifest_version": 3,
+  "name": "BrowserFriend",
+  "version": "1.0.0",
+  "description": "Track your browsing activity and get insights with BrowserFriend",
+
+  "permissions": [
+    "tabs",
+    "storage",
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "http://localhost:8000/*"
+  ],
+
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "BrowserFriend - Tab Tracker"
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
