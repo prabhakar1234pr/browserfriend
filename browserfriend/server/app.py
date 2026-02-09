@@ -3,16 +3,26 @@
 import logging
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 
 from browserfriend.config import get_config
-from browserfriend.database import User, get_engine, get_session_factory, init_database
+from browserfriend.database import (
+    PageVisit,
+    User,
+    create_new_session,
+    extract_domain,
+    get_current_session,
+    get_engine,
+    get_session_factory,
+    init_database,
+)
 
 
 # Configure logging
@@ -224,3 +234,90 @@ async def setup(setup_data: SetupData):
     except Exception as e:
         logger.error(f"Error in setup endpoint: {e}")
         raise
+
+
+@app.post("/api/track", response_model=SuccessResponse)
+async def track(tracking_data: TrackingData):
+    """Receive completed page visit from Chrome extension.
+
+    Creates a page visit record with session management.
+    """
+    logger.debug(
+        f"Track endpoint called: url={tracking_data.url}, duration={tracking_data.duration}s"
+    )
+    try:
+        SessionLocal = get_session_factory()
+        session = SessionLocal()
+        try:
+            # 1. Validate request body with TrackingData Pydantic model (already done)
+
+            # 2. Parse ISO timestamp string to datetime
+            try:
+                end_time = datetime.fromisoformat(tracking_data.timestamp.replace("Z", "+00:00"))
+                if end_time.tzinfo is None:
+                    end_time = end_time.replace(tzinfo=timezone.utc)
+            except ValueError as e:
+                logger.error(f"Invalid timestamp format: {tracking_data.timestamp}")
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid timestamp format: {tracking_data.timestamp}"
+                )
+
+            # 3. Get user email from User table
+            user = session.query(User).first()
+            if not user:
+                logger.error("No user found in database")
+                raise HTTPException(
+                    status_code=404, detail="No user found. Please run setup first."
+                )
+            user_email = user.email
+
+            # 4. Get current active session or create new one
+            current_session = get_current_session(user_email)
+            if not current_session:
+                logger.info(f"No active session found, creating new session for {user_email}")
+                current_session = create_new_session(user_email)
+            else:
+                logger.debug(f"Using existing session: {current_session.session_id}")
+
+            # 5. Extract domain from URL
+            domain = extract_domain(tracking_data.url)
+
+            # 6. Calculate start_time: start_time = timestamp - duration
+            start_time = end_time - timedelta(seconds=tracking_data.duration)
+
+            # 7. Create PageVisit record
+            page_visit = PageVisit(
+                session_id=current_session.session_id,
+                user_email=user_email,
+                url=tracking_data.url,
+                domain=domain,
+                title=tracking_data.title,
+                start_time=start_time,
+                end_time=end_time,
+                duration_seconds=tracking_data.duration,
+            )
+            session.add(page_visit)
+            session.commit()
+            session.refresh(page_visit)
+
+            logger.info(
+                f"Created page visit: {domain} for session {current_session.session_id} "
+                f"(duration: {tracking_data.duration}s)"
+            )
+
+            return SuccessResponse(
+                success=True, message=f"Page visit tracked: {domain}"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Database error in track endpoint: {e}")
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        finally:
+            session.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in track endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
