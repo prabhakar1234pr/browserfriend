@@ -19,6 +19,7 @@ class Config(BaseSettings):
     # LLM settings
     llm_provider: str = "google"  # "google" or "openai"
     google_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None  # Alias for google_api_key
     openai_api_key: Optional[str] = None
 
     # Email settings

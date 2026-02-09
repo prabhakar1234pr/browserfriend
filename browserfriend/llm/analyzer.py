@@ -58,6 +58,16 @@ DOMAIN_CATEGORIES: dict[str, str] = {
     "figma.com": "productivity",
     "chatgpt.com": "productivity",
     "claude.ai": "productivity",
+    "udemy.com": "productivity",
+    "coursera.org": "productivity",
+    "edx.org": "productivity",
+    "khanacademy.org": "productivity",
+    "leetcode.com": "development",
+    "codepen.io": "development",
+    "replit.com": "development",
+    "vercel.com": "development",
+    "netlify.com": "development",
+    "heroku.com": "development",
 }
 
 
@@ -203,11 +213,11 @@ def _get_gemini_model():
     from browserfriend.llm import APIKeyError
 
     config = get_config()
-    api_key = config.google_api_key
+    api_key = config.google_api_key or config.gemini_api_key
     if not api_key or api_key == "your_google_api_key_here":
         raise APIKeyError(
             "Google API key not configured. "
-            "Set GOOGLE_API_KEY in your .env file. "
+            "Set GOOGLE_API_KEY or GEMINI_API_KEY in your .env file. "
             "Get a key at https://makersuite.google.com/app/apikey"
         )
 
