@@ -23,7 +23,12 @@ class Config(BaseSettings):
     openai_api_key: Optional[str] = None
 
     # Email settings
+    email_provider: str = "smtp"  # "smtp" or "resend"
     resend_api_key: Optional[str] = None
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
     user_email: Optional[str] = None
 
     # Session settings
