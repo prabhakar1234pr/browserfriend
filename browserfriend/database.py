@@ -1,7 +1,7 @@
 """Database models and setup for BrowserFriend."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urlparse
@@ -54,13 +54,14 @@ class User(Base):
 
     __tablename__ = "users"
 
-    email = Column(String, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     def __repr__(self):
-        return f"<User(email={self.email}, created_at={self.created_at})>"
+        return f"<User(id={self.id}, email={self.email}, created_at={self.created_at})>"
 
 
 class BrowsingSession(Base):
@@ -87,7 +88,14 @@ class BrowsingSession(Base):
     def calculate_duration(self):
         """Calculate duration from start_time and end_time."""
         if self.end_time and self.start_time:
-            delta = self.end_time - self.start_time
+            end = self.end_time
+            start = self.start_time
+            # Normalize timezone awareness for comparison
+            if end.tzinfo is not None and start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            elif end.tzinfo is None and start.tzinfo is not None:
+                end = end.replace(tzinfo=timezone.utc)
+            delta = end - start
             self.duration = delta.total_seconds()
         return self.duration
 
@@ -132,7 +140,6 @@ Index("idx_page_visits_start_time", PageVisit.start_time)
 Index("idx_page_visits_user_email", PageVisit.user_email)
 Index("idx_browsing_sessions_user_email", BrowsingSession.user_email)
 Index("idx_browsing_sessions_start_time", BrowsingSession.start_time)
-Index("idx_users_email", User.email)
 
 
 # Database engine and session factory
@@ -214,6 +221,94 @@ def get_current_session(user_email: str) -> Optional[BrowsingSession]:
             .first()
         )
         return current_session
+    finally:
+        session.close()
+
+
+def get_or_create_active_session(
+    user_email: str, inactivity_timeout_minutes: int = 30
+) -> BrowsingSession:
+    """Get active session or create a new one, closing stale sessions first.
+
+    If an active session exists but the last page visit was more than
+    `inactivity_timeout_minutes` ago, the old session is ended and a new one
+    is created. This prevents sessions from staying active forever.
+
+    Args:
+        user_email: The user's email address
+        inactivity_timeout_minutes: Minutes of inactivity before session is considered stale
+
+    Returns:
+        An active BrowsingSession
+    """
+    SessionLocal = get_session_factory()
+    session = SessionLocal()
+    try:
+        # Find current active session
+        current = (
+            session.query(BrowsingSession)
+            .filter(
+                BrowsingSession.user_email == user_email,
+                BrowsingSession.end_time.is_(None),
+            )
+            .order_by(BrowsingSession.start_time.desc())
+            .first()
+        )
+
+        if current:
+            # Check last page visit in this session to detect staleness
+            last_visit = (
+                session.query(PageVisit)
+                .filter(PageVisit.session_id == current.session_id)
+                .order_by(PageVisit.end_time.desc())
+                .first()
+            )
+
+            cutoff = datetime.now(timezone.utc) - timedelta(
+                minutes=inactivity_timeout_minutes
+            )
+
+            # Determine the latest activity timestamp
+            last_activity = None
+            if last_visit and last_visit.end_time:
+                last_activity = last_visit.end_time
+                if last_activity.tzinfo is None:
+                    last_activity = last_activity.replace(tzinfo=timezone.utc)
+
+            if last_activity and last_activity < cutoff:
+                # Session is stale — end it
+                logger.info(
+                    f"Session {current.session_id} is stale "
+                    f"(last activity: {last_activity}, cutoff: {cutoff}). Ending it."
+                )
+                current.end_time = datetime.now(timezone.utc)
+                current.calculate_duration()
+                session.commit()
+                session.refresh(current)
+                logger.info(f"Ended stale session: {current.session_id}")
+                current = None  # Force creation of new session below
+            else:
+                logger.debug(
+                    f"Session {current.session_id} is still active "
+                    f"(last activity: {last_activity})"
+                )
+                return current
+
+        # No active session (or stale one was just ended) — create new
+        logger.info(f"Creating new session for user: {user_email}")
+        new_session = BrowsingSession(
+            session_id=str(uuid4()),
+            user_email=user_email,
+            start_time=datetime.now(timezone.utc),
+        )
+        session.add(new_session)
+        session.commit()
+        session.refresh(new_session)
+        logger.info(
+            f"Created new browsing session: {new_session.session_id} "
+            f"for user: {user_email}"
+        )
+        return new_session
     finally:
         session.close()
 

@@ -14,12 +14,13 @@ from pydantic import BaseModel, EmailStr
 
 from browserfriend.config import get_config
 from browserfriend.database import (
+    BrowsingSession,
     PageVisit,
     User,
-    create_new_session,
+    end_session,
     extract_domain,
-    get_current_session,
     get_engine,
+    get_or_create_active_session,
     get_session_factory,
     init_database,
 )
@@ -75,6 +76,7 @@ class TrackingData(BaseModel):
     title: Optional[str] = None
     duration: int  # seconds spent on page
     timestamp: str  # ISO format timestamp when user LEFT the page (end time)
+    email: EmailStr  # user email to identify which user this visit belongs to
 
 
 class SetupData(BaseModel):
@@ -90,6 +92,14 @@ class SuccessResponse(BaseModel):
     message: str
 
 
+class TrackResponse(BaseModel):
+    """Model for track endpoint response."""
+
+    success: bool
+    message: str
+    session_id: str
+
+
 class StatusResponse(BaseModel):
     """Model for status endpoint response."""
 
@@ -102,6 +112,21 @@ class SetupResponse(BaseModel):
 
     success: bool
     email: str
+
+
+class EndSessionRequest(BaseModel):
+    """Model for session end request."""
+
+    session_id: str
+
+
+class EndSessionResponse(BaseModel):
+    """Model for session end response."""
+
+    success: bool
+    message: str
+    session_id: str
+    duration_seconds: Optional[float] = None
 
 
 @asynccontextmanager
@@ -174,27 +199,12 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
-async def health():
-    """Health check endpoint."""
-    logger.debug("Health check endpoint called")
-    try:
-        logger.debug("Processing health check request")
-        response_data = {
-            "status": "healthy",
-            "service": "BrowserFriend",
-            "version": "0.1.0",
-        }
-        logger.debug(f"Health check response: {response_data}")
-        return JSONResponse(status_code=200, content=response_data)
-    except Exception as e:
-        logger.error(f"Error in health check endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
-
-
 @app.get("/api/status", response_model=StatusResponse)
 async def status():
-    """Get server and database status."""
+    """Get server and database status.
+
+    Single status/health endpoint that checks server state and database connectivity.
+    """
     logger.info("Status endpoint called - checking server and database status")
     try:
         # Check database connection
@@ -237,13 +247,15 @@ async def setup(setup_data: SetupData):
         logger.debug("Database session created")
 
         try:
-            # Query User table
+            # Query User table by email
             logger.debug(f"Querying User table for email: {setup_data.email}")
             user = session.query(User).filter(User.email == setup_data.email).first()
 
             if user:
-                logger.info(f"User already exists: {user.email} (created at: {user.created_at})")
-                logger.debug(f"Existing user details: email={user.email}")
+                logger.info(
+                    f"User already exists: id={user.id}, email={user.email} "
+                    f"(created at: {user.created_at})"
+                )
             else:
                 logger.info(f"User not found, creating new user: {setup_data.email}")
                 user = User(email=setup_data.email)
@@ -252,7 +264,10 @@ async def setup(setup_data: SetupData):
                 session.commit()
                 logger.debug("User commit successful")
                 session.refresh(user)
-                logger.info(f"Created new user: {user.email} (created at: {user.created_at})")
+                logger.info(
+                    f"Created new user: id={user.id}, email={user.email} "
+                    f"(created at: {user.created_at})"
+                )
 
             response = SetupResponse(success=True, email=user.email)
             logger.debug(f"Setup response: {response.model_dump()}")
@@ -261,7 +276,7 @@ async def setup(setup_data: SetupData):
         except Exception as e:
             session.rollback()
             logger.error(f"Database error in setup endpoint: {e}", exc_info=True)
-            logger.error(f"Rolled back transaction due to error")
+            logger.error("Rolled back transaction due to error")
             raise HTTPException(
                 status_code=500, detail=f"Database error during setup: {str(e)}"
             )
@@ -275,14 +290,17 @@ async def setup(setup_data: SetupData):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.post("/api/track", response_model=SuccessResponse)
+@app.post("/api/track", response_model=TrackResponse)
 async def track(tracking_data: TrackingData):
     """Receive completed page visit from Chrome extension.
 
     Creates a page visit record with session management.
+    Requires email to identify the user (no single-user assumption).
+    Returns the session_id used for this visit.
+    Stale sessions (>30 min inactivity) are auto-ended and a new session is created.
     """
     logger.info(
-        f"Track endpoint called: url={tracking_data.url}, "
+        f"Track endpoint called: email={tracking_data.email}, url={tracking_data.url}, "
         f"title={tracking_data.title}, duration={tracking_data.duration}s, "
         f"timestamp={tracking_data.timestamp}"
     )
@@ -322,32 +340,25 @@ async def track(tracking_data: TrackingData):
                     detail=f"Invalid timestamp format: {tracking_data.timestamp}. Expected ISO format.",
                 )
 
-            # 3. Get user email from User table
-            logger.debug("Querying User table for first user")
-            user = session.query(User).first()
+            # 3. Validate user exists by email from request
+            user_email = tracking_data.email
+            logger.debug(f"Querying User table for email: {user_email}")
+            user = session.query(User).filter(User.email == user_email).first()
             if not user:
-                logger.error("No user found in database - setup required")
+                logger.error(f"No user found with email: {user_email} - setup required")
                 raise HTTPException(
-                    status_code=404, detail="No user found. Please run setup first."
+                    status_code=404,
+                    detail=f"No user found with email: {user_email}. Please run setup first.",
                 )
-            user_email = user.email
-            logger.info(f"Found user: {user_email}")
+            logger.info(f"Found user: id={user.id}, email={user.email}")
 
-            # 4. Get current active session or create new one
-            logger.debug(f"Getting current active session for user: {user_email}")
-            current_session = get_current_session(user_email)
-            if not current_session:
-                logger.info(f"No active session found, creating new session for {user_email}")
-                current_session = create_new_session(user_email)
-                logger.info(
-                    f"Created new session: {current_session.session_id} "
-                    f"(start_time: {current_session.start_time})"
-                )
-            else:
-                logger.info(
-                    f"Using existing active session: {current_session.session_id} "
-                    f"(start_time: {current_session.start_time})"
-                )
+            # 4. Get active session (auto-ends stale sessions, creates new if needed)
+            logger.debug(f"Getting or creating active session for user: {user_email}")
+            current_session = get_or_create_active_session(user_email)
+            logger.info(
+                f"Active session: {current_session.session_id} "
+                f"(start_time: {current_session.start_time})"
+            )
 
             # 5. Extract domain from URL
             logger.debug(f"Extracting domain from URL: {tracking_data.url}")
@@ -394,7 +405,11 @@ async def track(tracking_data: TrackingData):
                 f"session={current_session.session_id}, duration={tracking_data.duration}s"
             )
 
-            response = SuccessResponse(success=True, message=f"Page visit tracked: {domain}")
+            response = TrackResponse(
+                success=True,
+                message=f"Page visit tracked: {domain}",
+                session_id=current_session.session_id,
+            )
             logger.debug(f"Track response: {response.model_dump()}")
             return response
         except HTTPException:
@@ -403,7 +418,7 @@ async def track(tracking_data: TrackingData):
         except Exception as e:
             session.rollback()
             logger.error(f"Database error in track endpoint: {e}", exc_info=True)
-            logger.error(f"Rolled back transaction due to error")
+            logger.error("Rolled back transaction due to error")
             raise HTTPException(
                 status_code=500, detail=f"Database error during tracking: {str(e)}"
             )
@@ -411,8 +426,88 @@ async def track(tracking_data: TrackingData):
             session.close()
             logger.debug("Database session closed")
     except HTTPException:
-        logger.warning("HTTPException raised in track endpoint, re-raising")
         raise
     except Exception as e:
         logger.error(f"Unexpected error in track endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/api/session/end", response_model=EndSessionResponse)
+async def end_session_endpoint(request: EndSessionRequest):
+    """End a browsing session by setting end_time.
+
+    Sets end_time to now and calculates session duration.
+    """
+    logger.info(f"End session endpoint called for session_id: {request.session_id}")
+    logger.debug(f"End session request data: {request.model_dump()}")
+
+    try:
+        logger.debug("Getting session factory")
+        SessionLocal = get_session_factory()
+        session = SessionLocal()
+        logger.debug("Database session created")
+
+        try:
+            # Find the session
+            logger.debug(f"Querying BrowsingSession for id: {request.session_id}")
+            browsing_session = (
+                session.query(BrowsingSession)
+                .filter(BrowsingSession.session_id == request.session_id)
+                .first()
+            )
+
+            if not browsing_session:
+                logger.error(f"Session not found: {request.session_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Session not found: {request.session_id}",
+                )
+
+            if browsing_session.end_time is not None:
+                logger.warning(
+                    f"Session {request.session_id} is already ended "
+                    f"(end_time: {browsing_session.end_time})"
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Session {request.session_id} is already ended.",
+                )
+
+            # End the session
+            logger.debug(f"Ending session: {request.session_id}")
+            browsing_session.end_time = datetime.now(timezone.utc)
+            browsing_session.calculate_duration()
+            session.commit()
+            session.refresh(browsing_session)
+
+            logger.info(
+                f"Session ended: {request.session_id}, "
+                f"duration={browsing_session.duration}s, "
+                f"end_time={browsing_session.end_time}"
+            )
+
+            response = EndSessionResponse(
+                success=True,
+                message=f"Session ended successfully",
+                session_id=request.session_id,
+                duration_seconds=browsing_session.duration,
+            )
+            logger.debug(f"End session response: {response.model_dump()}")
+            return response
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Database error in end session endpoint: {e}", exc_info=True)
+            logger.error("Rolled back transaction due to error")
+            raise HTTPException(
+                status_code=500, detail=f"Database error ending session: {str(e)}"
+            )
+        finally:
+            session.close()
+            logger.debug("Database session closed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in end session endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
