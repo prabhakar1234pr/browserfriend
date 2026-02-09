@@ -124,12 +124,19 @@ def _read_pid() -> Optional[int]:
     return data.get("pid")
 
 
-def _write_pid_data(pid: int, session_id: str) -> None:
-    """Write PID + session_id + started_at to the PID file as JSON."""
+def _write_pid_data(
+    pid: int,
+    session_id: str,
+    duration_seconds: Optional[int] = None,
+    auto_stop_at: Optional[str] = None,
+) -> None:
+    """Write PID + session_id + started_at + duration info to the PID file as JSON."""
     data = {
         "pid": pid,
         "session_id": session_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "duration_seconds": duration_seconds,
+        "auto_stop_at": auto_stop_at,
     }
     logger.debug("Writing PID data to %s: %s", PID_FILE, data)
     PID_DIR.mkdir(exist_ok=True)
@@ -236,6 +243,71 @@ def _format_duration(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def parse_duration(duration_str: str) -> int:
+    """Parse duration string to seconds.
+
+    Supported formats:
+        5m, 30m    -> minutes
+        2h, 8h     -> hours
+        1d, 7d     -> days
+
+    Args:
+        duration_str: Duration string (e.g., "5m", "2h", "1d")
+
+    Returns:
+        Duration in seconds
+
+    Raises:
+        ValueError: If format is invalid
+    """
+    match = re.match(r"^(\d+)([mhd])$", duration_str.strip().lower())
+    if not match:
+        raise ValueError(
+            f"Invalid duration format: '{duration_str}'. "
+            "Use format like: 5m (minutes), 2h (hours), 1d (days)"
+        )
+
+    value = int(match.group(1))
+    unit = match.group(2)
+
+    if value <= 0:
+        raise ValueError("Duration value must be positive.")
+
+    multipliers = {"m": 60, "h": 3600, "d": 86400}
+    seconds = value * multipliers[unit]
+
+    logger.debug("Parsed duration '%s' -> %d seconds", duration_str, seconds)
+    return seconds
+
+
+def _format_duration_human(seconds: int) -> str:
+    """Format seconds into a human-friendly string.
+
+    Examples:
+        300  -> "5 minutes"
+        7200 -> "2 hours"
+        90   -> "1 minute 30 seconds"
+    """
+    if seconds >= 86400:
+        days = seconds // 86400
+        return f"{days} day{'s' if days != 1 else ''}"
+    if seconds >= 3600:
+        hours = seconds // 3600
+        remaining_min = (seconds % 3600) // 60
+        parts = [f"{hours} hour{'s' if hours != 1 else ''}"]
+        if remaining_min:
+            parts.append(f"{remaining_min} minute{'s' if remaining_min != 1 else ''}")
+        return " ".join(parts)
+    if seconds >= 60:
+        minutes = seconds // 60
+        remaining_sec = seconds % 60
+        parts = [f"{minutes} minute{'s' if minutes != 1 else ''}"]
+        if remaining_sec:
+            parts.append(f"{remaining_sec} second{'s' if remaining_sec != 1 else ''}")
+        return " ".join(parts)
+    return f"{seconds} second{'s' if seconds != 1 else ''}"
+
+
 # ---------------------------------------------------------------------------
 # Command: setup
 # ---------------------------------------------------------------------------
@@ -321,7 +393,14 @@ def setup() -> None:
 
 
 @app.command()
-def start() -> None:
+def start(
+    duration: Optional[str] = typer.Option(
+        None,
+        "--duration",
+        "-d",
+        help="Auto-stop after duration (e.g., 5m, 2h, 1d). If not set, runs until manually stopped.",
+    ),
+) -> None:
     """Start the BrowserFriend server as a background process."""
     logger.info("=" * 60)
     logger.info("CLI command: start")
@@ -347,6 +426,21 @@ def start() -> None:
     if pid:
         logger.info("Stale PID file found (PID %d not running), cleaning up", pid)
         _delete_pid()
+
+    # Parse duration if provided
+    duration_seconds = None
+    auto_stop_time = None
+
+    if duration:
+        try:
+            duration_seconds = parse_duration(duration)
+            auto_stop_time = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
+            typer.echo(f"Auto-stop scheduled in {_format_duration_human(duration_seconds)}")
+            typer.echo(f"Will stop at: {auto_stop_time.strftime('%I:%M %p')}")
+        except ValueError as e:
+            logger.error("Invalid duration: %s", e)
+            typer.echo(f"Error: {e}")
+            raise typer.Exit(code=1)
 
     # Ensure user is configured
     user_email = _get_user_email()
@@ -412,8 +506,13 @@ def start() -> None:
         )
         logger.info("Server process started with PID %d", proc.pid)
 
-        # Issue 7 fix: store pid + session_id together in PID file
-        _write_pid_data(proc.pid, session_id)
+        # Issue 7 fix: store pid + session_id + duration info in PID file
+        _write_pid_data(
+            proc.pid,
+            session_id,
+            duration_seconds=duration_seconds,
+            auto_stop_at=auto_stop_time.isoformat() if auto_stop_time else None,
+        )
 
     except Exception as exc:
         logger.error("Failed to start server process: %s", exc, exc_info=True)
@@ -446,9 +545,132 @@ def start() -> None:
         raise typer.Exit(code=1)
     logger.info("Server process verified running (PID %d)", proc.pid)
 
-    typer.echo(f"Server started on http://{config.server_host}:{config.server_port}")
+    # If duration provided, start monitor process
+    if duration_seconds:
+        _start_duration_monitor(session_id, user_email, duration_seconds)
+        typer.echo(f"Server started with auto-stop in {_format_duration_human(duration_seconds)}")
+    else:
+        typer.echo("Server started (runs until you stop it)")
+
+    typer.echo(f"URL: http://{config.server_host}:{config.server_port}")
     typer.echo(f"Session ID: {session_id}")
     logger.info("Start command completed successfully")
+
+
+# ---------------------------------------------------------------------------
+# Duration monitor
+# ---------------------------------------------------------------------------
+
+MONITOR_PID_FILE = PID_DIR / "monitor.pid"
+
+
+def _start_duration_monitor(session_id: str, user_email: str, duration_seconds: int) -> None:
+    """Start a background process that auto-stops the server after *duration_seconds*.
+
+    The monitor sleeps in a loop (checking every 60 s) until the absolute stop
+    time is reached, then triggers the stop -> dashboard -> email workflow.
+
+    Args:
+        session_id: Current browsing session ID.
+        user_email: User email for dashboard generation.
+        duration_seconds: How long to wait before auto-stop.
+    """
+    project_root = Path(__file__).parent.parent
+
+    monitor_script = f"""
+import time, sys, os, json
+from pathlib import Path
+from datetime import datetime, timezone
+
+project_root = Path(r"{project_root}")
+sys.path.insert(0, str(project_root))
+
+from dotenv import load_dotenv
+load_dotenv(project_root / ".env")
+
+auto_stop_at = datetime.now(timezone.utc).timestamp() + {duration_seconds}
+
+print(f"Duration monitor started – waiting {duration_seconds} seconds ...")
+
+while datetime.now(timezone.utc).timestamp() < auto_stop_at:
+    time.sleep(min(60, max(1, auto_stop_at - datetime.now(timezone.utc).timestamp())))
+
+print("Duration reached! Auto-stopping server ...")
+
+# --- Stop the server process ---
+pid_file = Path.home() / ".browserfriend" / "server.pid"
+stopped = False
+if pid_file.exists():
+    try:
+        import psutil
+        data = json.loads(pid_file.read_text())
+        pid = data.get("pid")
+        if pid:
+            try:
+                proc = psutil.Process(pid)
+                proc.terminate()
+                proc.wait(timeout=5)
+                stopped = True
+                print(f"Server process {{pid}} terminated")
+            except Exception as e:
+                print(f"Could not terminate server: {{e}}")
+        pid_file.unlink(missing_ok=True)
+    except Exception as e:
+        print(f"Error reading PID file: {{e}}")
+else:
+    print("No PID file found – server may already be stopped")
+    stopped = True
+
+# --- Generate dashboard and send email ---
+print("Generating dashboard ...")
+try:
+    from browserfriend.llm.analyzer import generate_insights
+    insights = generate_insights("{session_id}")
+
+    from browserfriend.email.renderer import render_dashboard_email
+    html_content = render_dashboard_email(insights, insights["stats"], "{user_email}")
+
+    from browserfriend.email.sender import send_dashboard_email
+    if send_dashboard_email("{user_email}", html_content):
+        print(f"Dashboard sent to {user_email}")
+        from browserfriend.database import save_dashboard
+        save_dashboard("{session_id}", "{user_email}", insights, html_content)
+        print("Dashboard saved to database")
+    else:
+        print("Failed to send email – check RESEND_API_KEY")
+except Exception as e:
+    print(f"Error generating dashboard: {{e}}")
+    import traceback
+    traceback.print_exc()
+
+# Clean up own PID file
+monitor_pid = Path.home() / ".browserfriend" / "monitor.pid"
+monitor_pid.unlink(missing_ok=True)
+
+print("Auto-stop sequence complete!")
+"""
+
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+
+    monitor_process = subprocess.Popen(
+        [sys.executable, "-c", monitor_script],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **kwargs,
+    )
+
+    logger.info(
+        "Started duration monitor (PID: %d) for %d seconds",
+        monitor_process.pid,
+        duration_seconds,
+    )
+
+    PID_DIR.mkdir(exist_ok=True)
+    MONITOR_PID_FILE.write_text(str(monitor_process.pid))
 
 
 # ---------------------------------------------------------------------------
@@ -591,6 +813,21 @@ def stop() -> None:
 
     _delete_pid()
 
+    # Kill duration monitor if running
+    if MONITOR_PID_FILE.exists():
+        try:
+            monitor_pid = int(MONITOR_PID_FILE.read_text().strip())
+            monitor_proc = psutil.Process(monitor_pid)
+            monitor_proc.terminate()
+            MONITOR_PID_FILE.unlink(missing_ok=True)
+            typer.echo("Cancelled auto-stop timer")
+            logger.info("Cancelled duration monitor (PID %d)", monitor_pid)
+        except (psutil.NoSuchProcess, ValueError):
+            MONITOR_PID_FILE.unlink(missing_ok=True)
+            logger.debug("Monitor process already gone, cleaned up PID file")
+        except psutil.AccessDenied:
+            logger.warning("Cannot terminate monitor process – access denied")
+
     # Display summary
     typer.echo("Server stopped.")
     if session_summary:
@@ -647,6 +884,22 @@ def status() -> None:
     if server_running:
         typer.echo(f"  Server     : RUNNING (PID {pid})")
         typer.echo(f"  URL        : http://{config.server_host}:{config.server_port}")
+
+        # Show auto-stop info if scheduled
+        try:
+            pid_data = _read_pid_data()
+            if pid_data and pid_data.get("auto_stop_at"):
+                auto_stop = datetime.fromisoformat(pid_data["auto_stop_at"])
+                now = datetime.now(timezone.utc)
+                remaining = (auto_stop - now).total_seconds()
+
+                if remaining > 0:
+                    typer.echo(f"  Auto-stop  : in {_format_duration_human(int(remaining))}")
+                    typer.echo(f"  Stops at   : {auto_stop.strftime('%I:%M %p')}")
+                else:
+                    typer.echo("  Auto-stop  : imminent (time reached)")
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.debug("Could not read auto-stop info: %s", exc)
     else:
         typer.echo("  Server     : STOPPED")
 
