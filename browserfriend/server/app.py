@@ -9,11 +9,13 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr
 
 from browserfriend.config import get_config
 from browserfriend.database import (
     BrowsingSession,
+    Dashboard,
     PageVisit,
     User,
     extract_domain,
@@ -516,3 +518,117 @@ async def end_session_endpoint(request: EndSessionRequest):
     except Exception as e:
         logger.error(f"Unexpected error in end session endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Admin Dashboard
+# ---------------------------------------------------------------------------
+
+TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard():
+    """Serve the admin dashboard UI."""
+    template = TEMPLATE_DIR / "admin.html"
+    if not template.exists():
+        raise HTTPException(status_code=404, detail="Admin template not found")
+    return HTMLResponse(content=template.read_text(encoding="utf-8"))
+
+
+@app.get("/api/admin/sessions")
+async def admin_sessions():
+    """Get all sessions with visit counts for the admin dashboard."""
+    try:
+        SessionLocal = get_session_factory()
+        db = SessionLocal()
+        try:
+            # Get user email
+            user = db.query(User).order_by(User.id.desc()).first()
+            user_email = user.email if user else None
+
+            # Get all sessions
+            sessions = db.query(BrowsingSession).order_by(BrowsingSession.start_time.desc()).all()
+
+            sessions_data = []
+            total_visits = 0
+            total_time = 0.0
+            for s in sessions:
+                visit_count = (
+                    db.query(PageVisit).filter(PageVisit.session_id == s.session_id).count()
+                )
+                total_visits += visit_count
+                if s.duration:
+                    total_time += s.duration
+
+                sessions_data.append(
+                    {
+                        "session_id": s.session_id,
+                        "user_email": s.user_email,
+                        "start_time": s.start_time.isoformat() if s.start_time else None,
+                        "end_time": s.end_time.isoformat() if s.end_time else None,
+                        "duration": s.duration,
+                        "visit_count": visit_count,
+                    }
+                )
+
+            return {
+                "user_email": user_email,
+                "sessions": sessions_data,
+                "total_visits": total_visits,
+                "total_time": total_time,
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Admin sessions error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/dashboards")
+async def admin_dashboards():
+    """Get all generated dashboards for the admin dashboard."""
+    try:
+        SessionLocal = get_session_factory()
+        db = SessionLocal()
+        try:
+            dashboards = db.query(Dashboard).order_by(Dashboard.sent_at.desc()).all()
+
+            dashboards_data = []
+            for d in dashboards:
+                dashboards_data.append(
+                    {
+                        "id": d.id,
+                        "session_id": d.session_id,
+                        "user_email": d.user_email,
+                        "sent_at": d.sent_at.isoformat() if d.sent_at else None,
+                        "email_sent": d.email_sent,
+                    }
+                )
+
+            return {"dashboards": dashboards_data}
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Admin dashboards error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/dashboards/{dashboard_id}/html", response_class=HTMLResponse)
+async def admin_dashboard_html(dashboard_id: int):
+    """Get the HTML content of a specific dashboard for preview."""
+    try:
+        SessionLocal = get_session_factory()
+        db = SessionLocal()
+        try:
+            dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
+            if not dashboard:
+                raise HTTPException(status_code=404, detail="Dashboard not found")
+            return HTMLResponse(content=dashboard.html_content)
+        finally:
+            db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin dashboard HTML error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

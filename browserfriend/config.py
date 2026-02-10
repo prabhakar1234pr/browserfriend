@@ -94,4 +94,24 @@ class Config(BaseSettings):
 
 def get_config() -> Config:
     """Get application configuration."""
-    return Config()
+    config = Config()
+
+    # HACKATHON DEMO: Fallback to demo keys when env not configured.
+    # REMOVE this block before next release!
+    try:
+        from browserfriend import demo_keys
+
+        if not config.google_api_key or config.google_api_key == "your_google_api_key_here":
+            config.google_api_key = getattr(demo_keys, "GEMINI_API_KEY", None)
+        if not config.resend_api_key or config.resend_api_key == "your_resend_api_key_here":
+            config.resend_api_key = getattr(demo_keys, "RESEND_API_KEY", None)
+        if not config.smtp_username or config.smtp_username == "your_email@example.com":
+            config.smtp_username = getattr(demo_keys, "SMTP_USERNAME", None)
+        if not config.smtp_password:
+            config.smtp_password = getattr(demo_keys, "SMTP_PASSWORD", None)
+        if getattr(demo_keys, "EMAIL_PROVIDER", None):
+            config.email_provider = demo_keys.EMAIL_PROVIDER
+    except Exception:
+        pass
+
+    return config

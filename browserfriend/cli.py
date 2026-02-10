@@ -1,4 +1,4 @@
-"""CLI implementation for BrowserFriend using Typer.
+"""CLI implementation for BrowserFriend using Typer + Rich.
 
 Provides commands: setup, start, stop, status, dashboard.
 """
@@ -17,8 +17,26 @@ from typing import Optional
 
 import psutil
 import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from browserfriend.config import get_config
+
+# ---------------------------------------------------------------------------
+# Rich console
+# ---------------------------------------------------------------------------
+
+console = Console()
+
+# Brand colours
+BRAND = "bold cyan"
+SUCCESS = "bold green"
+ERROR = "bold red"
+WARNING = "bold yellow"
+DIM = "dim"
+ACCENT = "bold magenta"
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -74,8 +92,9 @@ EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
 app = typer.Typer(
     name="bf",
-    help="BrowserFriend – track, analyse and understand your browsing habits.",
+    help="BrowserFriend — track, analyse and understand your browsing habits.",
     add_completion=False,
+    rich_markup_mode="rich",
 )
 
 # ---------------------------------------------------------------------------
@@ -315,7 +334,7 @@ def _format_duration_human(seconds: int) -> str:
 
 @app.command()
 def setup() -> None:
-    """Initial user configuration and email registration."""
+    """[bold cyan]Configure[/bold cyan] your email for BrowserFriend."""
     logger.info("=" * 60)
     logger.info("CLI command: setup")
     logger.info("=" * 60)
@@ -328,24 +347,36 @@ def setup() -> None:
     except Exception as exc:
         logger.debug("Could not init database in setup preamble: %s", exc)
 
+    console.print()
+    console.print(
+        Panel(
+            "[bold cyan]BrowserFriend[/bold cyan]  [dim]·[/dim]  Initial Setup",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+    console.print()
+
     existing_email = _get_user_email()
     if existing_email:
         logger.info("Existing user found: %s", existing_email)
-        typer.echo(f"Current email: {existing_email}")
-        update = typer.confirm("Do you want to update your email?", default=False)
+        console.print(f"  [dim]Current email:[/dim]  [bold]{existing_email}[/bold]")
+        console.print()
+        update = typer.confirm("  Do you want to update your email?", default=False)
         if not update:
             logger.info("User chose not to update email")
-            typer.echo("Setup unchanged. Current email kept.")
+            console.print("  [dim]Setup unchanged. Current email kept.[/dim]")
+            console.print()
             return
         logger.info("User chose to update email")
 
-    email = typer.prompt("Enter your email address")
+    email = typer.prompt("  Enter your email address")
     logger.info("User entered email: %s", email)
 
     # Validate email format with proper regex (Issue 6 fix)
     if not EMAIL_REGEX.match(email):
         logger.error("Invalid email format: %s", email)
-        typer.echo("Error: Invalid email format. Please provide a valid email.")
+        console.print("  [red]✗[/red]  Invalid email format. Please provide a valid email.")
         raise typer.Exit(code=1)
 
     logger.debug("Email validation passed (regex)")
@@ -368,7 +399,9 @@ def setup() -> None:
                     user.id,
                     user.email,
                 )
-                typer.echo(f"User already registered: {user.email}")
+                console.print(
+                    f"  [green]✓[/green]  User already registered: [bold]{user.email}[/bold]"
+                )
             else:
                 logger.info("Creating new user with email: %s", email)
                 user = User(email=email)
@@ -381,17 +414,19 @@ def setup() -> None:
                     user.email,
                     user.created_at,
                 )
-                typer.echo(f"User registered successfully: {user.email}")
+                console.print(f"  [green]✓[/green]  User registered: [bold]{user.email}[/bold]")
         finally:
             session.close()
             logger.debug("Database session closed")
 
     except Exception as exc:
         logger.error("Setup failed: %s", exc, exc_info=True)
-        typer.echo(f"Error during setup: {exc}")
+        console.print(f"  [red]✗[/red]  Setup failed: {exc}")
         raise typer.Exit(code=1)
 
-    typer.echo("\nNext step: Run `bf start` to begin tracking.")
+    console.print()
+    console.print("  [dim]Next →[/dim]  Run [bold cyan]bf start[/bold cyan] to begin tracking.")
+    console.print()
     logger.info("Setup command completed successfully")
 
 
@@ -409,7 +444,7 @@ def start(
         help="Auto-stop after duration (e.g., 5m, 2h, 1d). If not set, runs until manually stopped.",
     ),
 ) -> None:
-    """Start the BrowserFriend server as a background process."""
+    """[bold cyan]Start[/bold cyan] the tracking server as a background process."""
     logger.info("=" * 60)
     logger.info("CLI command: start")
     logger.info("=" * 60)
@@ -422,12 +457,23 @@ def start(
         config.database_path,
     )
 
+    console.print()
+    console.print(
+        Panel(
+            "[bold cyan]BrowserFriend[/bold cyan]  [dim]·[/dim]  Starting Server",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+    console.print()
+
     # Check if server is already running
     pid = _read_pid()
     if pid and _is_server_running(pid):
         logger.warning("Server already running with PID %d", pid)
-        typer.echo(f"Error: Server is already running (PID {pid}).")
-        typer.echo("Run `bf stop` first to stop the current server.")
+        console.print(f"  [red]✗[/red]  Server is already running [dim](PID {pid})[/dim]")
+        console.print("  [dim]Run[/dim] [bold cyan]bf stop[/bold cyan] [dim]first.[/dim]")
+        console.print()
         raise typer.Exit(code=1)
 
     # Clean up stale PID file if process is dead
@@ -443,18 +489,19 @@ def start(
         try:
             duration_seconds = parse_duration(duration)
             auto_stop_time = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-            typer.echo(f"Auto-stop scheduled in {_format_duration_human(duration_seconds)}")
-            typer.echo(f"Will stop at: {auto_stop_time.strftime('%I:%M %p')}")
         except ValueError as e:
             logger.error("Invalid duration: %s", e)
-            typer.echo(f"Error: {e}")
+            console.print(f"  [red]✗[/red]  {e}")
+            console.print()
             raise typer.Exit(code=1)
 
     # Ensure user is configured
     user_email = _get_user_email()
     if not user_email:
         logger.error("No user configured – setup required")
-        typer.echo("Error: No user configured. Run `bf setup` first.")
+        console.print("  [red]✗[/red]  No user configured.")
+        console.print("  [dim]Run[/dim] [bold cyan]bf setup[/bold cyan] [dim]first.[/dim]")
+        console.print()
         raise typer.Exit(code=1)
     logger.info("User email for session: %s", user_email)
 
@@ -467,13 +514,11 @@ def start(
         logger.info("Database tables ready")
     except Exception as exc:
         logger.error("Database initialisation failed: %s", exc, exc_info=True)
-        typer.echo(f"Error: Failed to initialise database: {exc}")
+        console.print(f"  [red]✗[/red]  Failed to initialise database: {exc}")
+        console.print()
         raise typer.Exit(code=1)
 
     # ── Issue 3 fix: create session BEFORE starting server ──
-    # This prevents the race where the extension hits the server before a
-    # session exists, causing get_or_create_active_session to spawn a
-    # duplicate session.
     try:
         from browserfriend.database import create_new_session
 
@@ -483,7 +528,8 @@ def start(
         logger.info("Browsing session created: session_id=%s, user=%s", session_id, user_email)
     except Exception as exc:
         logger.error("Failed to create browsing session: %s", exc, exc_info=True)
-        typer.echo(f"Error: Failed to create session: {exc}")
+        console.print(f"  [red]✗[/red]  Failed to create session: {exc}")
+        console.print()
         raise typer.Exit(code=1)
 
     # Start server as background process
@@ -501,15 +547,27 @@ def start(
             logger.debug("Unix platform detected – using start_new_session=True")
             kwargs["start_new_session"] = True
 
-        # Use main.py as the entry point for the server
-        main_py = Path(__file__).parent.parent / "main.py"
-        logger.debug("Server entry point: %s", main_py)
+        # Use uvicorn to run the server (works when installed from PyPI;
+        # main.py is not included in the package)
+        server_module = "browserfriend.server.app:app"
+        uvicorn_args = [
+            python_exe,
+            "-m",
+            "uvicorn",
+            server_module,
+            "--host",
+            config.server_host,
+            "--port",
+            str(config.server_port),
+            "--log-level",
+            config.log_level.lower(),
+        ]
+        logger.debug("Server entry point: %s", " ".join(uvicorn_args))
 
         proc = subprocess.Popen(
-            [python_exe, str(main_py)],
+            uvicorn_args,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            cwd=str(main_py.parent),
             **kwargs,
         )
         logger.info("Server process started with PID %d", proc.pid)
@@ -533,7 +591,8 @@ def start(
             logger.info("Cleaned up session %s", session_id)
         except Exception as cleanup_exc:
             logger.warning("Failed to clean up session: %s", cleanup_exc)
-        typer.echo(f"Error: Failed to start server: {exc}")
+        console.print(f"  [red]✗[/red]  Failed to start server: {exc}")
+        console.print()
         raise typer.Exit(code=1)
 
     # Wait briefly and verify server started
@@ -549,22 +608,46 @@ def start(
             end_session(session_id)
         except Exception:
             pass
-        typer.echo("Error: Server failed to start. Check logs for details.")
+        console.print("  [red]✗[/red]  Server failed to start. Check logs for details.")
+        console.print()
         raise typer.Exit(code=1)
     logger.info("Server process verified running (PID %d)", proc.pid)
 
-    # If duration provided, start monitor process
+    # Build info table
+    info = Table(show_header=False, box=None, padding=(0, 2), show_edge=False)
+    info.add_column(style="dim", min_width=12)
+    info.add_column(style="bold")
+
+    info.add_row("Status", "[green]● Running[/green]")
+    info.add_row("URL", f"http://{config.server_host}:{config.server_port}")
+    info.add_row("Admin", f"http://{config.server_host}:{config.server_port}/admin")
+    info.add_row("PID", str(proc.pid))
+    info.add_row("Session", session_id[:8] + "…")
+    info.add_row("User", user_email)
+
     if duration_seconds:
         _start_duration_monitor(session_id, user_email, duration_seconds)
-        typer.echo(
-            f"Server started — {_format_duration_human(duration_seconds)} countdown begins "
-            "when the extension starts tracking"
-        )
-    else:
-        typer.echo("Server started (runs until you stop it)")
+        info.add_row("Auto-stop", f"in {_format_duration_human(duration_seconds)}")
+        if auto_stop_time:
+            info.add_row("Stops at", auto_stop_time.strftime("%I:%M %p"))
 
-    typer.echo(f"URL: http://{config.server_host}:{config.server_port}")
-    typer.echo(f"Session ID: {session_id}")
+    console.print(
+        Panel(
+            info,
+            border_style="green",
+            title="[bold green]Server Started[/bold green]",
+            padding=(1, 2),
+        )
+    )
+
+    if duration_seconds:
+        console.print("  [dim]Countdown begins when the extension starts tracking.[/dim]")
+    else:
+        console.print("  [dim]Runs until you stop it with[/dim] [bold cyan]bf stop[/bold cyan]")
+    console.print(
+        f"  [dim]Admin dashboard:[/dim] [bold cyan]http://{config.server_host}:{config.server_port}/admin[/bold cyan]"
+    )
+    console.print()
     logger.info("Start command completed successfully")
 
 
@@ -586,18 +669,16 @@ def _start_duration_monitor(session_id: str, user_email: str, duration_seconds: 
         user_email: User email for dashboard generation.
         duration_seconds: How long to wait before auto-stop.
     """
-    project_root = Path(__file__).parent.parent
+    # Use cwd for .env (works when installed from PyPI; project .env when developing)
+    cwd = Path.cwd()
 
     monitor_script = f"""
 import time, sys, os, json
 from pathlib import Path
 from datetime import datetime, timezone
 
-project_root = Path(r"{project_root}")
-sys.path.insert(0, str(project_root))
-
 from dotenv import load_dotenv
-load_dotenv(project_root / ".env")
+load_dotenv(Path(r"{cwd}") / ".env")
 
 # --- Phase 1: Wait for the extension to start tracking ---
 # The countdown should not begin until actual browsing activity is recorded.
@@ -746,16 +827,27 @@ print("Auto-stop sequence complete!")
 
 @app.command()
 def stop() -> None:
-    """Stop the BrowserFriend server and display session summary."""
+    """[bold cyan]Stop[/bold cyan] the server and show session summary."""
     logger.info("=" * 60)
     logger.info("CLI command: stop")
     logger.info("=" * 60)
+
+    console.print()
+    console.print(
+        Panel(
+            "[bold cyan]BrowserFriend[/bold cyan]  [dim]·[/dim]  Stopping Server",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+    console.print()
 
     # Issue 7 fix: read full PID data (pid + session_id)
     pid_data = _read_pid_data()
     if pid_data is None:
         logger.warning("No PID file found – server not running")
-        typer.echo("Error: Server is not running (no PID file found).")
+        console.print("  [red]✗[/red]  Server is not running [dim](no PID file found)[/dim]")
+        console.print()
         raise typer.Exit(code=1)
 
     pid = pid_data.get("pid")
@@ -770,13 +862,15 @@ def stop() -> None:
     if pid is None:
         logger.warning("PID file exists but has no pid value")
         _delete_pid()
-        typer.echo("Error: Corrupt PID file. Cleaned up.")
+        console.print("  [red]✗[/red]  Corrupt PID file. Cleaned up.")
+        console.print()
         raise typer.Exit(code=1)
 
     if not _is_server_running(pid):
         logger.warning("Process %d is not running – cleaning up stale PID", pid)
         _delete_pid()
-        typer.echo("Error: Server process not found. Cleaned up stale PID file.")
+        console.print("  [red]✗[/red]  Server process not found. Cleaned up stale PID file.")
+        console.print()
         raise typer.Exit(code=1)
 
     # End the active browsing session
@@ -831,7 +925,7 @@ def stop() -> None:
                 logger.info("No active session found for user %s", user_email)
         except Exception as exc:
             logger.error("Failed to end session: %s", exc, exc_info=True)
-            typer.echo(f"Warning: Could not end session cleanly: {exc}")
+            console.print(f"  [yellow]![/yellow]  Could not end session cleanly: {exc}")
 
     # Issue 5 fix: verify process identity before terminating
     logger.info("Terminating server process PID %d", pid)
@@ -853,9 +947,10 @@ def stop() -> None:
                     cmdline,
                 )
                 _delete_pid()
-                typer.echo(
-                    f"Warning: Process {pid} is not BrowserFriend server. PID file cleaned up."
+                console.print(
+                    f"  [yellow]![/yellow]  Process {pid} is not BrowserFriend server. PID file cleaned up."
                 )
+                console.print()
                 return
         except (psutil.AccessDenied, psutil.ZombieProcess):
             logger.debug("Cannot verify cmdline for PID %d, proceeding with termination", pid)
@@ -886,7 +981,7 @@ def stop() -> None:
             monitor_proc = psutil.Process(monitor_pid)
             monitor_proc.terminate()
             MONITOR_PID_FILE.unlink(missing_ok=True)
-            typer.echo("Cancelled auto-stop timer")
+            console.print("  [dim]Auto-stop timer cancelled.[/dim]")
             logger.info("Cancelled duration monitor (PID %d)", monitor_pid)
         except (psutil.NoSuchProcess, ValueError):
             MONITOR_PID_FILE.unlink(missing_ok=True)
@@ -895,19 +990,37 @@ def stop() -> None:
             logger.warning("Cannot terminate monitor process – access denied")
 
     # Display summary
-    typer.echo("Server stopped.")
-    if session_summary:
-        typer.echo("")
-        typer.echo("--- Session Summary ---")
-        typer.echo(f"  Session ID : {session_summary['session_id']}")
-        typer.echo(f"  Duration   : {_format_duration(session_summary['duration'])}")
-        typer.echo(f"  Visits     : {session_summary['visit_count']}")
-        if session_summary["top_domains"]:
-            typer.echo("  Top Domains:")
-            for domain, count in session_summary["top_domains"]:
-                typer.echo(f"    - {domain} ({count} visits)")
-        typer.echo("-----------------------")
+    console.print(f"  [green]✓[/green]  Server stopped [dim](PID {pid})[/dim]")
+    console.print()
 
+    if session_summary:
+        summary = Table(show_header=False, box=None, padding=(0, 2), show_edge=False)
+        summary.add_column(style="dim", min_width=12)
+        summary.add_column(style="bold")
+
+        summary.add_row("Session", session_summary["session_id"][:8] + "…")
+        summary.add_row("Duration", _format_duration(session_summary["duration"]))
+        summary.add_row("Visits", str(session_summary["visit_count"]))
+
+        if session_summary["top_domains"]:
+            domains_text = Text()
+            for i, (domain, count) in enumerate(session_summary["top_domains"]):
+                if i > 0:
+                    domains_text.append(", ")
+                domains_text.append(domain, style="bold")
+                domains_text.append(f" ({count})", style="dim")
+            summary.add_row("Top Sites", domains_text)
+
+        console.print(
+            Panel(
+                summary,
+                border_style="magenta",
+                title="[bold magenta]Session Summary[/bold magenta]",
+                padding=(1, 2),
+            )
+        )
+
+    console.print()
     logger.info("Stop command completed successfully")
 
 
@@ -918,10 +1031,20 @@ def stop() -> None:
 
 @app.command()
 def status() -> None:
-    """Display current server and session status."""
+    """[bold cyan]Show[/bold cyan] server and session status."""
     logger.info("=" * 60)
     logger.info("CLI command: status")
     logger.info("=" * 60)
+
+    console.print()
+    console.print(
+        Panel(
+            "[bold cyan]BrowserFriend[/bold cyan]  [dim]·[/dim]  Status",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+    console.print()
 
     config = get_config()
 
@@ -944,12 +1067,16 @@ def status() -> None:
         except Exception as exc:
             logger.debug("HTTP ping failed: %s", exc)
 
-    typer.echo("=== BrowserFriend Status ===")
-    typer.echo("")
+    # Server info table
+    info = Table(show_header=False, box=None, padding=(0, 2), show_edge=False)
+    info.add_column(style="dim", min_width=14)
+    info.add_column(style="bold")
 
     if server_running:
-        typer.echo(f"  Server     : RUNNING (PID {pid})")
-        typer.echo(f"  URL        : http://{config.server_host}:{config.server_port}")
+        info.add_row("Server", "[green]● Running[/green]")
+        info.add_row("URL", f"http://{config.server_host}:{config.server_port}")
+        if pid:
+            info.add_row("PID", str(pid))
 
         # Show auto-stop info if scheduled
         try:
@@ -960,20 +1087,22 @@ def status() -> None:
                 remaining = (auto_stop - now).total_seconds()
 
                 if remaining > 0:
-                    typer.echo(f"  Auto-stop  : in {_format_duration_human(int(remaining))}")
-                    typer.echo(f"  Stops at   : {auto_stop.strftime('%I:%M %p')}")
+                    info.add_row("Auto-stop", f"in {_format_duration_human(int(remaining))}")
+                    info.add_row("Stops at", auto_stop.strftime("%I:%M %p"))
                 else:
-                    typer.echo("  Auto-stop  : imminent (time reached)")
+                    info.add_row("Auto-stop", "[yellow]imminent[/yellow]")
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.debug("Could not read auto-stop info: %s", exc)
     else:
-        typer.echo("  Server     : STOPPED")
+        info.add_row("Server", "[red]● Stopped[/red]")
 
-    typer.echo(f"  Database   : {config.database_path}")
+    info.add_row("Database", str(config.database_path))
 
     # Session and visit info
     user_email = _get_user_email()
     if user_email:
+        info.add_row("User", user_email)
+
         logger.debug("Querying session info for user: %s", user_email)
         try:
             from browserfriend.database import (
@@ -987,11 +1116,11 @@ def status() -> None:
             active_session = get_current_session(user_email)
             if active_session:
                 visits_in_session = get_visits_by_session(active_session.session_id)
-                typer.echo("")
-                typer.echo("  --- Active Session ---")
-                typer.echo(f"  Session ID : {active_session.session_id}")
-                typer.echo(f"  Started    : {active_session.start_time}")
-                typer.echo(f"  Visits     : {len(visits_in_session)}")
+                info.add_row("", "")
+                info.add_row("[bold]Active Session[/bold]", "")
+                info.add_row("Session", active_session.session_id[:8] + "…")
+                info.add_row("Started", str(active_session.start_time))
+                info.add_row("Visits", str(len(visits_in_session)))
 
                 # Issue 10 fix: warn if session may be stale (>30 min inactive)
                 if visits_in_session:
@@ -1010,9 +1139,9 @@ def status() -> None:
                                 last_end = last_end.replace(tzinfo=timezone.utc)
                             time_since = datetime.now(timezone.utc) - last_end
                             if time_since > timedelta(minutes=30):
-                                typer.echo(
-                                    f"  WARNING: Session may be stale (>30 min inactive, "
-                                    f"last activity {_format_duration(time_since.total_seconds())} ago)"
+                                info.add_row(
+                                    "",
+                                    f"[yellow]⚠ Stale — last activity {_format_duration(time_since.total_seconds())} ago[/yellow]",
                                 )
                                 logger.warning(
                                     "Active session %s may be stale (last activity %s ago)",
@@ -1029,24 +1158,79 @@ def status() -> None:
                     len(visits_in_session),
                 )
             else:
-                typer.echo("")
-                typer.echo("  No active session.")
+                info.add_row("Session", "[dim]No active session[/dim]")
                 logger.info("No active session for user %s", user_email)
 
             all_visits = get_visits_by_user(user_email)
-            typer.echo(f"  Total visits (all time): {len(all_visits)}")
+            info.add_row("Total visits", str(len(all_visits)))
             logger.info("Total all-time visits: %d", len(all_visits))
         except Exception as exc:
             logger.error("Failed to query session/visit info: %s", exc, exc_info=True)
-            typer.echo(f"  (Could not query session info: {exc})")
+            info.add_row("", f"[dim]Could not query session info: {exc}[/dim]")
     else:
-        typer.echo("")
-        typer.echo("  No user configured. Run `bf setup` first.")
+        info.add_row("User", "[yellow]Not configured[/yellow]")
+        info.add_row("", "[dim]Run[/dim] [bold cyan]bf setup[/bold cyan] [dim]first[/dim]")
         logger.info("No user configured")
 
-    typer.echo("")
-    typer.echo("============================")
+    border = "green" if server_running else "red"
+    console.print(Panel(info, border_style=border, padding=(1, 2)))
+    console.print()
     logger.info("Status command completed successfully")
+
+
+# ---------------------------------------------------------------------------
+# Command: end-sessions
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def end_sessions(
+    all_users: bool = typer.Option(
+        False,
+        "--all-users",
+        "-a",
+        help="End active sessions for all users (default: only current user)",
+    ),
+) -> None:
+    """[bold cyan]End[/bold cyan] all active browsing sessions."""
+    logger.info("=" * 60)
+    logger.info("CLI command: end-sessions")
+    logger.info("=" * 60)
+
+    console.print()
+    console.print(
+        Panel(
+            "[bold cyan]BrowserFriend[/bold cyan]  [dim]·[/dim]  End Active Sessions",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+    console.print()
+
+    try:
+        from browserfriend.database import end_all_active_sessions
+
+        user_email = None if all_users else _get_user_email()
+        if not all_users and not user_email:
+            console.print(
+                "  [red]✗[/red]  No user configured. Run [bold cyan]bf setup[/bold cyan] first."
+            )
+            console.print()
+            raise typer.Exit(code=1)
+
+        count = end_all_active_sessions(user_email=user_email)
+
+        if count == 0:
+            console.print("  [dim]No active sessions to end.[/dim]")
+        else:
+            console.print(f"  [green]✓[/green]  Ended [bold]{count}[/bold] active session(s).")
+        console.print()
+        logger.info("End-sessions command completed: %d sessions ended", count)
+    except Exception as exc:
+        logger.error("Failed to end sessions: %s", exc, exc_info=True)
+        console.print(f"  [red]✗[/red]  Failed: {exc}")
+        console.print()
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
@@ -1058,15 +1242,27 @@ def status() -> None:
 def dashboard(
     session_id: Optional[str] = typer.Option(None, help="Specific session ID (default: latest)"),
 ) -> None:
-    """Generate AI-powered dashboard with browsing insights and send via email."""
+    """[bold cyan]Generate[/bold cyan] AI-powered dashboard and send via email."""
     logger.info("=" * 60)
     logger.info("CLI command: dashboard")
     logger.info("=" * 60)
 
+    console.print()
+    console.print(
+        Panel(
+            "[bold cyan]BrowserFriend[/bold cyan]  [dim]·[/dim]  Dashboard",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+    console.print()
+
     user_email = _get_user_email()
     if not user_email:
         logger.error("No user configured")
-        typer.echo("Error: No user configured. Run `bf setup` first.")
+        console.print("  [red]✗[/red]  No user configured.")
+        console.print("  [dim]Run[/dim] [bold cyan]bf setup[/bold cyan] [dim]first.[/dim]")
+        console.print()
         raise typer.Exit(code=1)
     logger.info("User email: %s", user_email)
 
@@ -1074,9 +1270,10 @@ def dashboard(
     pid = _read_pid()
     if pid and _is_server_running(pid):
         logger.warning("Server is still running – warning user")
-        typer.echo(
-            "Warning: Server is currently running. Consider stopping it first with `bf stop`."
+        console.print(
+            "  [yellow]![/yellow]  Server is still running. Consider [bold cyan]bf stop[/bold cyan] first."
         )
+        console.print()
 
     # Get session for this user
     try:
@@ -1100,9 +1297,10 @@ def dashboard(
                 )
             if not session:
                 logger.error("No browsing sessions found for user: %s", user_email)
-                typer.echo(
-                    "Error: No browsing sessions found. Start tracking first with `bf start`."
+                console.print(
+                    "  [red]✗[/red]  No browsing sessions found. Run [bold cyan]bf start[/bold cyan] first."
                 )
+                console.print()
                 raise typer.Exit(code=1)
 
             target_session_id = session.session_id
@@ -1113,27 +1311,35 @@ def dashboard(
         raise
     except Exception as exc:
         logger.error("Failed to query sessions: %s", exc, exc_info=True)
-        typer.echo(f"Error: Failed to query sessions: {exc}")
+        console.print(f"  [red]✗[/red]  Failed to query sessions: {exc}")
+        console.print()
         raise typer.Exit(code=1)
 
     # Generate insights
+    console.print(
+        f"  [dim]Generating insights for session[/dim] [bold]{target_session_id[:8]}…[/bold]"
+    )
     try:
         from browserfriend.llm import InsufficientDataError, LLMError
         from browserfriend.llm.analyzer import generate_insights
 
         insights = generate_insights(target_session_id)
+        console.print("  [green]✓[/green]  Insights generated")
 
     except InsufficientDataError as exc:
         logger.error("Insufficient data: %s", exc)
-        typer.echo(f"Error: {exc}")
+        console.print(f"  [red]✗[/red]  {exc}")
+        console.print()
         raise typer.Exit(code=1)
     except LLMError as exc:
         logger.error("LLM error: %s", exc)
-        typer.echo(f"Error: {exc}")
+        console.print(f"  [red]✗[/red]  {exc}")
+        console.print()
         raise typer.Exit(code=1)
     except Exception as exc:
         logger.error("Dashboard generation failed: %s", exc, exc_info=True)
-        typer.echo(f"Error: Failed to generate dashboard: {exc}")
+        console.print(f"  [red]✗[/red]  Failed to generate dashboard: {exc}")
+        console.print()
         raise typer.Exit(code=1)
 
     # Render HTML email
@@ -1142,9 +1348,11 @@ def dashboard(
 
         html_content = render_dashboard_email(insights, insights["stats"], user_email)
         logger.info("Email template rendered (%d chars)", len(html_content))
+        console.print("  [green]✓[/green]  Email rendered")
     except Exception as exc:
         logger.error("Email rendering failed: %s", exc, exc_info=True)
-        typer.echo(f"Error: Failed to render email template: {exc}")
+        console.print(f"  [red]✗[/red]  Failed to render email: {exc}")
+        console.print()
         raise typer.Exit(code=1)
 
     # Send email
@@ -1152,24 +1360,26 @@ def dashboard(
         from browserfriend.email.sender import send_dashboard_email
 
         if send_dashboard_email(user_email, html_content):
-            typer.echo(f"Check your email! Dashboard sent to {user_email}")
+            console.print(f"  [green]✓[/green]  Dashboard sent to [bold]{user_email}[/bold]")
             logger.info("Dashboard email sent to %s", user_email)
         else:
-            typer.echo("Failed to send email. Check your SMTP settings in .env")
+            console.print("  [red]✗[/red]  Failed to send email. Check SMTP/Resend settings.")
             logger.error("send_dashboard_email returned False")
     except Exception as exc:
         logger.error("Email sending failed: %s", exc, exc_info=True)
-        typer.echo(f"Error: Failed to send email: {exc}")
+        console.print(f"  [red]✗[/red]  Failed to send email: {exc}")
 
     # Save dashboard to database
     try:
         from browserfriend.database import save_dashboard
 
         save_dashboard(target_session_id, user_email, insights, html_content)
+        console.print("  [green]✓[/green]  Dashboard saved to database")
         logger.info("Dashboard saved to database")
     except Exception as exc:
         logger.warning("Failed to save dashboard to database: %s", exc)
 
+    console.print()
     logger.info("Dashboard command completed successfully")
 
 

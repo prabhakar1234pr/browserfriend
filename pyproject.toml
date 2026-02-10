@@ -1,9 +1,21 @@
 [project]
 name = "browserfriend"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.3.3"
+description = "Browser tracking and analytics with CLI, dashboard, and LLM integration"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Prabhakar Elavala", email = "prabhakarpr554@gmail.com" },
+]
+keywords = ["browser", "analytics", "tracking", "dashboard", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
     "fastapi",
     "uvicorn",
@@ -22,6 +34,10 @@ dependencies = [
 
 [project.scripts]
 bf = "browserfriend.cli:cli_main"
+
+[project.urls]
+Homepage = "https://github.com/prabhakar1234pr/browserfriend"
+Repository = "https://github.com/prabhakar1234pr/browserfriend"
 
 [project.optional-dependencies]
 dev = [
@@ -50,6 +66,21 @@ line_length = 100
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["browserfriend"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "browserfriend/",
+    "pyproject.toml",
+    "README.md",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "twine>=6.2.0",
+]

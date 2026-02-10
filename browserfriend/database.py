@@ -372,6 +372,38 @@ def end_session(session_id: str) -> Optional[BrowsingSession]:
         session.close()
 
 
+def end_all_active_sessions(user_email: Optional[str] = None) -> int:
+    """End all active (unended) browsing sessions.
+
+    Args:
+        user_email: If provided, only end sessions for this user.
+            If None, end all active sessions for all users.
+
+    Returns:
+        Number of sessions ended.
+    """
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        query = db.query(BrowsingSession).filter(BrowsingSession.end_time.is_(None))
+        if user_email:
+            query = query.filter(BrowsingSession.user_email == user_email)
+        active_sessions = query.all()
+
+        count = 0
+        for s in active_sessions:
+            s.end_time = datetime.now(timezone.utc)
+            s.calculate_duration()
+            count += 1
+            logger.info(f"Ended browsing session: {s.session_id} (user: {s.user_email})")
+
+        if count > 0:
+            db.commit()
+        return count
+    finally:
+        db.close()
+
+
 def create_page_visit(
     session_id: str,
     user_email: str,
