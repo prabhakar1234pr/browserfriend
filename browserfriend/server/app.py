@@ -101,6 +101,7 @@ class StatusResponse(BaseModel):
 
     status: str
     database: str
+    user_email: Optional[str] = None
 
 
 class SetupResponse(BaseModel):
@@ -222,7 +223,21 @@ async def status():
         db_status = f"error: {str(e)}"
         logger.warning(f"Database status: {db_status}")
 
-    response = StatusResponse(status="running", database=db_status)
+    # Retrieve latest registered user email for extension auto-sync
+    latest_email = None
+    try:
+        SessionLocal = get_session_factory()
+        db_session = SessionLocal()
+        try:
+            user = db_session.query(User).order_by(User.id.desc()).first()
+            if user:
+                latest_email = user.email
+        finally:
+            db_session.close()
+    except Exception as e:
+        logger.debug(f"Could not query user email for status: {e}")
+
+    response = StatusResponse(status="running", database=db_status, user_email=latest_email)
     logger.debug(f"Status response: {response.model_dump()}")
     return response
 
