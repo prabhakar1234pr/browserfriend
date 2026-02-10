@@ -556,7 +556,10 @@ def start(
     # If duration provided, start monitor process
     if duration_seconds:
         _start_duration_monitor(session_id, user_email, duration_seconds)
-        typer.echo(f"Server started with auto-stop in {_format_duration_human(duration_seconds)}")
+        typer.echo(
+            f"Server started — {_format_duration_human(duration_seconds)} countdown begins "
+            "when the extension starts tracking"
+        )
     else:
         typer.echo("Server started (runs until you stop it)")
 
@@ -596,9 +599,52 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 load_dotenv(project_root / ".env")
 
-auto_stop_at = datetime.now(timezone.utc).timestamp() + {duration_seconds}
+# --- Phase 1: Wait for the extension to start tracking ---
+# The countdown should not begin until actual browsing activity is recorded.
+print("Waiting for extension to start tracking ...")
 
-print(f"Duration monitor started – waiting {duration_seconds} seconds ...")
+WAIT_TIMEOUT = 300  # give up after 5 minutes of no activity
+wait_start = datetime.now(timezone.utc).timestamp()
+tracking_started = False
+
+from browserfriend.database import get_session_factory, init_database
+from browserfriend.database import PageVisit
+init_database()
+
+while datetime.now(timezone.utc).timestamp() - wait_start < WAIT_TIMEOUT:
+    try:
+        SessionLocal = get_session_factory()
+        db = SessionLocal()
+        try:
+            visit = db.query(PageVisit).filter(PageVisit.session_id == "{session_id}").first()
+            if visit:
+                tracking_started = True
+                print("Extension connected — first activity detected!")
+                break
+        finally:
+            db.close()
+    except Exception:
+        pass
+    time.sleep(3)
+
+if not tracking_started:
+    print("No tracking activity detected within 5 minutes — starting countdown anyway")
+
+# --- Phase 2: Actual countdown starts NOW ---
+auto_stop_at = datetime.now(timezone.utc).timestamp() + {duration_seconds}
+stop_time_iso = datetime.fromtimestamp(auto_stop_at, tz=timezone.utc).isoformat()
+
+# Update the PID file so bf status shows accurate remaining time
+pid_file = Path.home() / ".browserfriend" / "server.pid"
+if pid_file.exists():
+    try:
+        data = json.loads(pid_file.read_text())
+        data["auto_stop_at"] = stop_time_iso
+        pid_file.write_text(json.dumps(data))
+    except Exception:
+        pass
+
+print(f"Countdown started — waiting {duration_seconds} seconds ...")
 
 while datetime.now(timezone.utc).timestamp() < auto_stop_at:
     time.sleep(min(60, max(1, auto_stop_at - datetime.now(timezone.utc).timestamp())))
