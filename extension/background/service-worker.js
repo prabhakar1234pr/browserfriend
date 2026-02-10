@@ -388,9 +388,26 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   log.info(`[EVENT] tabs.onUpdated — tabId=${tabId}, url="${tab.url}"`);
 
-  // Only process if this is the currently active tab
   const currentState = await getCurrentTabState();
-  if (!currentState || currentState.tabId !== tabId) {
+
+  // If no tab is being tracked, check whether this is the active tab and
+  // start tracking it.  This covers the gap after finalizePreviousTab clears
+  // state — without this, in-tab navigations (e.g. Yahoo → X.com) are lost.
+  if (!currentState) {
+    const activeTab = await getActiveTab();
+    if (activeTab && activeTab.id === tabId && shouldTrackUrl(tab.url)) {
+      log.info(
+        `tabs.onUpdated: no tracked tab — starting to track active tab ${tabId} (${tab.url})`
+      );
+      await startTrackingTab(tab);
+    } else {
+      log.debug("tabs.onUpdated: no tracked state and not the active tab — ignoring");
+    }
+    return;
+  }
+
+  // Ignore updates for tabs we're not tracking
+  if (currentState.tabId !== tabId) {
     log.debug("tabs.onUpdated: not the tracked tab — ignoring");
     return;
   }
