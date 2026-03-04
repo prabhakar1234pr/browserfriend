@@ -43,8 +43,8 @@ env/
 .env
 .env.local
 
-# Hackathon demo keys - exclude from repo (include in PyPI build when building locally)
-browserfriend/demo_keys.py
+# Secrets (never commit)
+demo_keys.py
 
 # Database
 *.db
